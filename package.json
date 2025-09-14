@@ -1,0 +1,64 @@
+{
+  "name": "@karanb192/reddit-buddy-mcp",
+  "version": "1.0.3",
+  "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
+  "main": "dist/index.js",
+  "bin": {
+    "reddit-buddy": "./dist/cli.js",
+    "reddit-buddy-mcp": "./dist/cli.js"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && chmod +x dist/cli.js",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "docker:build": "docker build -t reddit-buddy-mcp .",
+    "docker:run": "docker run -it reddit-buddy-mcp",
+    "docker:run-http": "docker run -p 3000:3000 -e REDDIT_BUDDY_HTTP=true reddit-buddy-mcp"
+  },
+  "keywords": [
+    "reddit",
+    "mcp",
+    "claude",
+    "ai",
+    "assistant",
+    "model-context-protocol"
+  ],
+  "author": "Karan Bansal <karanb192@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karanb192/reddit-buddy-mcp"
+  },
+  "homepage": "https://github.com/karanb192/reddit-buddy-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/karanb192/reddit-buddy-mcp/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "@vitest/coverage-v8": "^1.6.0",
+    "eslint": "^8.57.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3",
+    "vitest": "^1.6.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}
