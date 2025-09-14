@@ -46,3 +46,4 @@ local-files/
 
 # Claude folder
 .claude/
+CLAUDE.md
