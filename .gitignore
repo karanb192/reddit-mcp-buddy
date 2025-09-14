@@ -43,3 +43,6 @@ tmp/
 
 # Local development files
 local-files/
+
+# Claude folder
+.claude/
