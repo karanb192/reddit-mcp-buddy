@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/karanb192-reddit-buddy-mcp-badge.png)](https://mseep.ai/app/karanb192-reddit-buddy-mcp)
+
 # 🤖 Reddit Buddy MCP
 
 ### Reddit Browser for Claude Desktop and AI Assistants
