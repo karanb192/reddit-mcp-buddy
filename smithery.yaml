@@ -1,40 +1,18 @@
-name: reddit-buddy
-description: Browse Reddit posts, search content, and analyze user activity without API keys
-author: karanb192
-repository: https://github.com/karanb192/reddit-buddy-mcp
-npm: "@karanb192/reddit-buddy-mcp"
-license: MIT
-categories:
-  - social-media
-  - search
-  - data-extraction
-  - research
-featured: false
-protocols:
-  - mcp
-tools:
-  - name: browse_subreddit
-    description: Get posts from any subreddit (hot/new/top/rising)
-  - name: search_reddit
-    description: Search across all Reddit content
-  - name: get_user_profile
-    description: Analyze user profiles and activity
-  - name: get_comments
-    description: Read full discussion threads
-config:
-  install:
-    npm: "@karanb192/reddit-buddy-mcp"
-  claude_desktop:
-    command: npx
-    args:
-      - "@karanb192/reddit-buddy-mcp"
-  requirements:
-    - Node.js 18+
-    - No API keys required
-tags:
-  - reddit
-  - social-media
-  - web-scraping
-  - no-auth
-  - claude-desktop
-  - typescript
+# smithery.yaml - Configuration for Reddit Buddy MCP on Smithery
+# https://smithery.ai/docs/build/project-config/smithery-yaml
+
+runtime: "container"
+startCommand:
+  type: "http"
+  configSchema:
+    type: "object"
+    properties:
+      # No configuration required - Reddit Buddy works out of the box!
+      # All settings are optional
+  exampleConfig: {}
+build:
+  dockerfile: "Dockerfile"
+  dockerBuildPath: "."
+env:
+  NODE_ENV: "production"
+  REDDIT_BUDDY_HTTP: "true"
