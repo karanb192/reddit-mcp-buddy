@@ -6,9 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production && \
-    npm install -g typescript
+# Install all dependencies (including dev deps for building)
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -53,4 +52,4 @@ ENV REDDIT_BUDDY_HTTP=true
 ENTRYPOINT ["dumb-init", "--"]
 
 # Start the application
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/cli.js"]
