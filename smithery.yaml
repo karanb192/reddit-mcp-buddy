@@ -6,13 +6,12 @@ startCommand:
   type: "http"
   configSchema:
     type: "object"
-    properties:
-      # No configuration required - Reddit Buddy works out of the box!
-      # All settings are optional
+    properties: {}
   exampleConfig: {}
 build:
-  dockerfile: "Dockerfile"
+  dockerfile: "./Dockerfile"
   dockerBuildPath: "."
 env:
   NODE_ENV: "production"
   REDDIT_BUDDY_HTTP: "true"
+  REDDIT_BUDDY_PORT: "3000"
