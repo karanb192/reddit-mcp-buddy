@@ -5,7 +5,7 @@ Your AI assistant's friendly Reddit companion. Clean, fast, and actually works.
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://img.shields.io/npm/v/@karanb192/reddit-buddy-mcp.svg)](https://www.npmjs.com/package/@karanb192/reddit-buddy-mcp)
-[![Node.js Version](https://img.shields.io/node/v/@karanb192/reddit-buddy-mcp)](https://nodejs.org)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-blue)](https://nodejs.org)
 
 ## Table of Contents
 
