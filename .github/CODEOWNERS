@@ -1,0 +1,6 @@
+# Code Owners for Reddit Buddy MCP
+# This file defines who must review and approve changes to this repository
+
+# Global owner - required reviewer for all changes
+# @karanb192 must approve all pull requests before they can be merged
+* @karanb192
