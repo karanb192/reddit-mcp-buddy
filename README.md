@@ -1,6 +1,8 @@
 # 🤖 Reddit Buddy MCP
 
-Your AI assistant's friendly Reddit companion. Clean, fast, and actually works.
+### Reddit Browser for Claude Desktop and AI Assistants
+
+A Model Context Protocol (MCP) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - no API keys required.
 
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
