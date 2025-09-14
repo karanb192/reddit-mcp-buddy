@@ -1,0 +1,63 @@
+{
+  "$schema": "https://registry.modelcontextprotocol.io/schemas/v1/server.json",
+  "name": "io.github.karanb192/reddit-buddy-mcp",
+  "version": "1.0.3",
+  "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
+  "author": {
+    "name": "Karan Bansal",
+    "email": "karanb192@gmail.com",
+    "url": "https://github.com/karanb192"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/karanb192/reddit-buddy-mcp",
+  "repository": "https://github.com/karanb192/reddit-buddy-mcp",
+  "bugs": "https://github.com/karanb192/reddit-buddy-mcp/issues",
+  "deployment": {
+    "packages": [
+      {
+        "type": "npm",
+        "name": "@karanb192/reddit-buddy-mcp",
+        "version": "1.0.3"
+      }
+    ]
+  },
+  "tags": [
+    "reddit",
+    "social-media",
+    "content",
+    "search",
+    "analysis"
+  ],
+  "features": [
+    "browse-subreddits",
+    "search-posts",
+    "get-comments",
+    "user-analysis",
+    "reddit-terms"
+  ],
+  "transports": [
+    "stdio"
+  ],
+  "tools": [
+    {
+      "name": "browse_subreddit",
+      "description": "Browse posts from any subreddit with sorting and filtering options"
+    },
+    {
+      "name": "search_reddit",
+      "description": "Search Reddit content across all subreddits or specific ones"
+    },
+    {
+      "name": "get_post_details",
+      "description": "Get detailed information about a post including comments"
+    },
+    {
+      "name": "user_analysis",
+      "description": "Analyze a Reddit user's profile, posts, and activity"
+    },
+    {
+      "name": "reddit_explain",
+      "description": "Get explanations of Reddit terms, slang, and culture"
+    }
+  ]
+}
