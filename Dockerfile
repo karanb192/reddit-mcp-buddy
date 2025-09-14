@@ -15,11 +15,16 @@ COPY . .
 # Build the TypeScript code
 RUN npm run build
 
-# Runtime stage
-FROM node:20-alpine
+# Runtime stage - Using slim instead of alpine for better SSL support
+FROM node:20-slim
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init curl
+# Install dumb-init for proper signal handling and update certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dumb-init \
+    curl \
+    ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -34,7 +39,7 @@ COPY --from=builder /app/README.md ./
 COPY --from=builder /app/LICENSE ./
 
 # Create non-root user
-RUN adduser -D -h /app appuser && \
+RUN useradd -m -d /app -s /bin/bash appuser && \
     chown -R appuser:appuser /app
 USER appuser
 
@@ -45,8 +50,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE 3000
 
-# Set environment variable for HTTP mode
+# Set environment variables
 ENV REDDIT_BUDDY_HTTP=true
+ENV NODE_ENV=production
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
