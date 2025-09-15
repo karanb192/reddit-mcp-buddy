@@ -1,7 +1,7 @@
 {
   "$schema": "https://registry.modelcontextprotocol.io/schemas/v1/server.json",
   "name": "io.github.karanb192/reddit-buddy-mcp",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
   "author": {
     "name": "Karan Bansal",
@@ -17,7 +17,7 @@
       {
         "type": "npm",
         "name": "@karanb192/reddit-buddy-mcp",
-        "version": "1.0.3"
+        "version": "1.0.4"
       }
     ]
   },
