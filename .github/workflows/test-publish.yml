@@ -74,10 +74,13 @@ jobs:
 
       - name: Test NPM publish (dry run)
         run: |
-          echo "Testing NPM publish with --dry-run..."
-          npm publish --dry-run --access public
-        env:
-          NODE_AUTH_TOKEN: "dummy-token-for-dry-run"
+          echo "Testing NPM package configuration..."
+          # Use npm pack instead of publish --dry-run to avoid auth issues
+          npm pack
+          echo "✅ Package can be built successfully"
+          ls -lh *.tgz
+          tar -tzf *.tgz | head -20
+          rm *.tgz
 
       - name: Install MCP Publisher CLI
         run: |
