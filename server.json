@@ -1,7 +1,7 @@
 {
-  "$schema": "https://registry.modelcontextprotocol.io/schemas/v1/server.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "io.github.karanb192/reddit-buddy-mcp",
-  "version": "1.0.6-test.4",
+  "version": "1.0.6-test.5",
   "description": "Reddit MCP server - browse posts, search content, analyze users.",
   "author": {
     "name": "Karan Bansal",
@@ -11,15 +11,13 @@
   "license": "MIT",
   "homepage": "https://github.com/karanb192/reddit-buddy-mcp",
   "bugs": "https://github.com/karanb192/reddit-buddy-mcp/issues",
-  "deployment": {
-    "packages": [
-      {
-        "type": "npm",
-        "name": "@karanb192/reddit-buddy-mcp",
-        "version": "1.0.6-test.4"
-      }
-    ]
-  },
+  "packages": [
+    {
+      "registry_type": "npm",
+      "identifier": "@karanb192/reddit-buddy-mcp",
+      "version": "1.0.6-test.5"
+    }
+  ],
   "tags": [
     "reddit",
     "social-media",

@@ -37,18 +37,12 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Install and use MCP Publisher
+      - name: Install MCP Publisher
         run: |
-          # Clone the MCP registry repo to get the publisher tool
-          git clone https://github.com/modelcontextprotocol/registry.git /tmp/mcp-registry
-          cd /tmp/mcp-registry
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
 
-          # Build the publisher tool
-          make publisher
+      - name: Login to MCP Registry
+        run: ./mcp-publisher login github-oidc
 
-          # Use the publisher to publish our server
-          ./bin/mcp-publisher login github-oidc
-
-          # Go back to our repo and publish
-          cd $GITHUB_WORKSPACE
-          /tmp/mcp-registry/bin/mcp-publisher publish
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
