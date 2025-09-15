@@ -45,4 +45,10 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
-        run: ./mcp-publisher publish
+        run: |
+          ./mcp-publisher publish
+          if [ $? -ne 0 ]; then
+            echo "::error::MCP Publisher failed to publish the server"
+            exit 1
+          fi
+          echo "✅ Successfully published to MCP registry!"
