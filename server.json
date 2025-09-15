@@ -12,7 +12,7 @@
   "homepage": "https://github.com/karanb192/reddit-buddy-mcp",
   "repository": {
     "type": "git",
-    "url": "https://github.com/karanb192/reddit-buddy-mcp"
+    "url": "https://github.com/karanb192/reddit-buddy-mcp.git"
   },
   "bugs": "https://github.com/karanb192/reddit-buddy-mcp/issues",
   "deployment": {
