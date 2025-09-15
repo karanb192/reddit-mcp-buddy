@@ -88,14 +88,24 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Install MCP Publisher CLI
+      - name: Test MCP Publisher installation
         run: |
-          npm install -g @modelcontextprotocol/mcp-publisher
+          echo "Testing MCP Publisher tool build..."
+          # Clone the MCP registry repo
+          git clone https://github.com/modelcontextprotocol/registry.git /tmp/mcp-registry
+          cd /tmp/mcp-registry
 
-      - name: Check MCP Publisher installation
-        run: |
-          which mcp-publisher
-          mcp-publisher --version || echo "Version command not available"
+          # Build the publisher tool
+          make publisher
+
+          # Check if it built successfully
+          if [ -f "./bin/mcp-publisher" ]; then
+            echo "✅ MCP Publisher built successfully"
+            ./bin/mcp-publisher --help || echo "Help command output"
+          else
+            echo "❌ MCP Publisher build failed"
+            exit 1
+          fi
 
       - name: Test MCP Registry authentication (mock)
         run: |

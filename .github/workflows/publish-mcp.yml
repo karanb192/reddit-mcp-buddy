@@ -37,14 +37,18 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Install MCP Publisher CLI
+      - name: Install and use MCP Publisher
         run: |
-          npm install -g @modelcontextprotocol/mcp-publisher
+          # Clone the MCP registry repo to get the publisher tool
+          git clone https://github.com/modelcontextprotocol/registry.git /tmp/mcp-registry
+          cd /tmp/mcp-registry
 
-      - name: Authenticate with MCP Registry (GitHub OIDC)
-        run: |
-          mcp-publisher login github-oidc
+          # Build the publisher tool
+          make publisher
 
-      - name: Publish to MCP Registry
-        run: |
-          mcp-publisher publish
+          # Use the publisher to publish our server
+          ./bin/mcp-publisher login github-oidc
+
+          # Go back to our repo and publish
+          cd $GITHUB_WORKSPACE
+          /tmp/mcp-registry/bin/mcp-publisher publish
