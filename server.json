@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "io.github.karanb192/reddit-buddy-mcp",
-  "version": "1.0.6-test.6",
+  "version": "1.0.6-test.7",
   "description": "Reddit MCP server - browse posts, search content, analyze users.",
   "author": {
     "name": "Karan Bansal",
@@ -15,7 +15,10 @@
     {
       "registry_type": "npm",
       "identifier": "@karanb192/reddit-buddy-mcp",
-      "version": "1.0.6-test.6"
+      "version": "1.0.6-test.7",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ],
   "tags": [
@@ -31,9 +34,6 @@
     "get-comments",
     "user-analysis",
     "reddit-terms"
-  ],
-  "transports": [
-    "stdio"
   ],
   "tools": [
     {
