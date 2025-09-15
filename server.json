@@ -1,7 +1,7 @@
 {
   "$schema": "https://registry.modelcontextprotocol.io/schemas/v1/server.json",
   "name": "io.github.karanb192/reddit-buddy-mcp",
-  "version": "1.0.6-test.3",
+  "version": "1.0.6-test.4",
   "description": "Reddit MCP server - browse posts, search content, analyze users.",
   "author": {
     "name": "Karan Bansal",
@@ -10,14 +10,13 @@
   },
   "license": "MIT",
   "homepage": "https://github.com/karanb192/reddit-buddy-mcp",
-  "repository": "github:karanb192/reddit-buddy-mcp",
   "bugs": "https://github.com/karanb192/reddit-buddy-mcp/issues",
   "deployment": {
     "packages": [
       {
         "type": "npm",
         "name": "@karanb192/reddit-buddy-mcp",
-        "version": "1.0.6-test.3"
+        "version": "1.0.6-test.4"
       }
     ]
   },
