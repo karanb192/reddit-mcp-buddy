@@ -1,6 +1,6 @@
 {
   "name": "@karanb192/reddit-buddy-mcp",
-  "version": "1.0.5",
+  "version": "1.0.6-test.1",
   "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
   "main": "dist/index.js",
   "mcpName": "io.github.karanb192/reddit-buddy-mcp",
