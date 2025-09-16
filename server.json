@@ -1,8 +1,8 @@
 {
-  "$schema": "https://registry.modelcontextprotocol.io/schemas/v1/server.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "io.github.karanb192/reddit-buddy-mcp",
-  "version": "1.0.3",
-  "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
+  "version": "1.0.6-test.7",
+  "description": "Reddit MCP server - browse posts, search content, analyze users.",
   "author": {
     "name": "Karan Bansal",
     "email": "karanb192@gmail.com",
@@ -10,17 +10,17 @@
   },
   "license": "MIT",
   "homepage": "https://github.com/karanb192/reddit-buddy-mcp",
-  "repository": "https://github.com/karanb192/reddit-buddy-mcp",
   "bugs": "https://github.com/karanb192/reddit-buddy-mcp/issues",
-  "deployment": {
-    "packages": [
-      {
-        "type": "npm",
-        "name": "@karanb192/reddit-buddy-mcp",
-        "version": "1.0.3"
+  "packages": [
+    {
+      "registry_type": "npm",
+      "identifier": "@karanb192/reddit-buddy-mcp",
+      "version": "1.0.6-test.7",
+      "transport": {
+        "type": "stdio"
       }
-    ]
-  },
+    }
+  ],
   "tags": [
     "reddit",
     "social-media",
@@ -34,9 +34,6 @@
     "get-comments",
     "user-analysis",
     "reddit-terms"
-  ],
-  "transports": [
-    "stdio"
   ],
   "tools": [
     {

@@ -46,3 +46,7 @@ local-files/
 
 # Claude folder
 .claude/
+CLAUDE.md
+
+# Test scripts and files (local testing only)
+test*
