@@ -106,35 +106,42 @@ Get explanations of Reddit terms.
 
 ## Authentication (Optional)
 
-Want 10x more requests? Add Reddit credentials:
+Want 10x more requests? Add Reddit credentials for enhanced rate limits:
 
-1. Go to https://www.reddit.com/prefs/apps
-2. Create an app (type: script)
-3. Add credentials to `.env`:
-
-```env
-REDDIT_CLIENT_ID=your_client_id
-REDDIT_CLIENT_SECRET=your_client_secret
-REDDIT_USER_AGENT=YourApp/1.0
+### Option 1: Interactive Setup (Recommended)
+```bash
+npx reddit-buddy --auth
 ```
 
-4. Update your Claude config:
+Follow the prompts to enter your Reddit app credentials. This supports:
+- **Anonymous mode**: 10 requests/minute (no setup needed)
+- **App-only mode**: 60 requests/minute (client ID + secret)
+- **Authenticated mode**: 100 requests/minute (full credentials)
+
+### Option 2: Environment Variables (for Claude Desktop)
+
+1. Go to https://www.reddit.com/prefs/apps
+2. Create an app (type: **script** - IMPORTANT!)
+3. Update your Claude Desktop config:
 
 ```json
 {
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["reddit-buddy-mcp"],
+      "args": ["@karanb192/reddit-buddy-mcp"],
       "env": {
         "REDDIT_CLIENT_ID": "your_client_id",
         "REDDIT_CLIENT_SECRET": "your_client_secret",
-        "REDDIT_USER_AGENT": "YourApp/1.0"
+        "REDDIT_USERNAME": "your_username",
+        "REDDIT_PASSWORD": "your_password"
       }
     }
   }
 }
 ```
+
+**Note**: For full 100 req/min rate limit, you need username + password. Without them, you get 60 req/min (app-only mode).
 
 ## Installation Options
 

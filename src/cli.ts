@@ -17,7 +17,7 @@ const __dirname = dirname(__filename);
 async function setupAuth() {
   console.log('\n🚀 Reddit Buddy Authentication Setup\n');
   console.log('This will help you set up authentication for 10x more requests.\n');
-  
+
   console.log('Step 1: Create a Reddit App');
   console.log('  1. Open: https://www.reddit.com/prefs/apps');
   console.log('  2. Click "Create App" or "Create Another App"');
@@ -27,49 +27,121 @@ async function setupAuth() {
   console.log('     • Description: Personal use');
   console.log('     • Redirect URI: http://localhost:8080');
   console.log('  4. Click "Create app"\n');
-  
-  console.log('Step 2: Find your Client ID');
-  console.log('  • Look under "personal use script"');
-  console.log('  • It looks like: XaBcDeFgHiJkLm\n');
-  
+
+  console.log('Step 2: Find your credentials');
+  console.log('  • Client ID: Look under "personal use script" (e.g., XaBcDeFgHiJkLm)');
+  console.log('  • Client Secret: The secret string shown on the app page\n');
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
-  
+
   try {
+    // Collect all credentials
     const clientId = await rl.question('Enter your Client ID: ');
-    
-    // Validate format
+
+    // Validate Client ID format
     if (!/^[A-Za-z0-9_-]{10,30}$/.test(clientId)) {
       console.error('\n❌ Invalid Client ID format. Should be 10-30 characters, alphanumeric.');
       process.exit(1);
     }
-    
-    // Test the client ID
-    console.log('\n🔄 Testing connection...');
-    
+
+    const clientSecret = await rl.question('Enter your Client Secret: ');
+
+    // Validate Client Secret
+    if (!clientSecret || clientSecret.length < 20) {
+      console.error('\n❌ Invalid Client Secret. Please check your Reddit app settings.');
+      process.exit(1);
+    }
+
+    console.log('\nFor full authentication (100 requests/minute), enter your Reddit account details.');
+    console.log('Leave blank for app-only auth (still better than anonymous).\n');
+
+    const username = await rl.question('Reddit Username (optional): ');
+    let password = '';
+
+    if (username) {
+      // Hide password input
+      const passwordQuestion = 'Reddit Password: ';
+      process.stdout.write(passwordQuestion);
+
+      // Disable echo for password
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+
+      password = await new Promise<string>((resolve) => {
+        let pwd = '';
+        process.stdin.on('data', (char) => {
+          const charStr = char.toString('utf8');
+          switch (charStr) {
+            case '\n':
+            case '\r':
+            case '\u0004':
+              process.stdin.setRawMode(false);
+              process.stdin.pause();
+              process.stdout.write('\n');
+              resolve(pwd);
+              break;
+            case '\u0003':
+              process.exit();
+              break;
+            case '\u007f':
+              if (pwd.length > 0) {
+                pwd = pwd.slice(0, -1);
+                process.stdout.write('\b \b');
+              }
+              break;
+            default:
+              pwd += charStr;
+              process.stdout.write('*');
+              break;
+          }
+        });
+      });
+    }
+
+    // Test the credentials
+    console.log('\n🔄 Testing authentication...');
+
     const authManager = new AuthManager();
-    await authManager.save({
+    const config = {
       clientId,
-      deviceId: 'DO_NOT_TRACK',
-    });
-    
-    // Try to get access token
+      clientSecret,
+      username: username || undefined,
+      password: password || undefined,
+      userAgent: 'RedditBuddy/1.0 (by /u/karanb192)'
+    };
+
+    // Set password temporarily for token retrieval
+    authManager['config'] = config;
+
     try {
-      await authManager.load();
-      await authManager.getAccessToken();
+      // Get access token to verify credentials
+      await authManager.refreshAccessToken();
+
       console.log('✅ Success! Authentication configured.');
-      console.log('📊 You now have access to 100 requests per minute.\n');
-      console.log('To start using Reddit Buddy, run:');
+
+      if (username && password) {
+        console.log('📊 Authenticated mode: 100 requests per minute');
+      } else {
+        console.log('📊 App-only mode: Better than anonymous, but limited');
+        console.log('💡 Tip: Provide username/password for full 100 req/min rate limit');
+      }
+
+      console.log('\nTo start using Reddit Buddy, run:');
       console.log('  reddit-buddy\n');
     } catch (error: any) {
       console.error('\n❌ Failed to authenticate. Please check:');
-      console.error('  • Client ID is correct');
+      console.error('  • Client ID and Secret are correct');
       console.error('  • App type is "script"');
-      console.error('  • Reddit is accessible\n');
-      console.error('Error:', error.message);
-      
+
+      if (username) {
+        console.error('  • Username and password are correct');
+      }
+
+      console.error('\nError:', error.message);
+
       // Clear invalid config
       await authManager.clear();
       process.exit(1);

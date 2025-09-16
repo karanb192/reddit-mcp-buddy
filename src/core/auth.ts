@@ -8,12 +8,14 @@ import { promises as fs } from 'fs';
 
 export interface AuthConfig {
   clientId: string;
-  clientSecret?: string;
+  clientSecret: string;  // Required for script apps
+  username?: string;     // For script app auth
+  password?: string;     // Never stored, only used temporarily
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: number;
   scope?: string;
-  deviceId?: string;
+  userAgent?: string;
 }
 
 export class AuthManager {
@@ -28,22 +30,54 @@ export class AuthManager {
    * Load authentication configuration
    */
   async load(): Promise<AuthConfig | null> {
+    // First check environment variables
+    const envConfig = this.loadFromEnv();
+    if (envConfig) {
+      this.config = envConfig;
+      return this.config;
+    }
+
+    // Then check config file
     try {
       const configFile = join(this.configPath, 'auth.json');
       const data = await fs.readFile(configFile, 'utf-8');
       this.config = JSON.parse(data);
-      
+
       // Validate config
       if (this.config && !this.isValidConfig(this.config)) {
         console.error('Invalid auth configuration found');
         this.config = null;
       }
-      
+
       return this.config;
     } catch (error) {
       // No auth configured or invalid file
       return null;
     }
+  }
+
+  /**
+   * Load configuration from environment variables
+   */
+  private loadFromEnv(): AuthConfig | null {
+    const clientId = process.env.REDDIT_CLIENT_ID;
+    const clientSecret = process.env.REDDIT_CLIENT_SECRET;
+    const username = process.env.REDDIT_USERNAME;
+    const password = process.env.REDDIT_PASSWORD;
+    const userAgent = process.env.REDDIT_USER_AGENT;
+
+    // Need at least client ID and secret for script apps
+    if (!clientId || !clientSecret) {
+      return null;
+    }
+
+    return {
+      clientId,
+      clientSecret,
+      username,
+      password,
+      userAgent: userAgent || 'RedditBuddy/1.0 (by /u/karanb192)'
+    };
   }
 
   /**
@@ -79,7 +113,9 @@ export class AuthManager {
    * Check if authenticated
    */
   isAuthenticated(): boolean {
-    return this.config !== null && this.config.clientId !== undefined;
+    return this.config !== null &&
+           this.config.clientId !== undefined &&
+           this.config.clientSecret !== undefined;
   }
 
   /**
@@ -108,22 +144,38 @@ export class AuthManager {
    * Refresh access token using client credentials
    */
   async refreshAccessToken(): Promise<void> {
-    if (!this.config?.clientId) {
-      throw new Error('No client ID configured');
+    if (!this.config?.clientId || !this.config?.clientSecret) {
+      throw new Error('No client credentials configured');
     }
 
     try {
-      // Reddit script apps can use device_id flow without secret
-      const auth = Buffer.from(`${this.config.clientId}:`).toString('base64');
-      
+      // Reddit script apps use password grant type
+      const auth = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64');
+
+      let body: string;
+
+      if (this.config.username && this.config.password) {
+        // Use password grant for authenticated requests (100 req/min)
+        body = new URLSearchParams({
+          grant_type: 'password',
+          username: this.config.username,
+          password: this.config.password,
+        }).toString();
+      } else {
+        // Use client credentials grant for anonymous requests (still better than no auth)
+        body = new URLSearchParams({
+          grant_type: 'client_credentials',
+        }).toString();
+      }
+
       const response = await fetch('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
         headers: {
           'Authorization': `Basic ${auth}`,
           'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'RedditBuddy/1.0.0 by karanb192'
+          'User-Agent': this.config.userAgent || 'RedditBuddy/1.0 (by /u/karanb192)'
         },
-        body: 'grant_type=https://oauth.reddit.com/grants/installed_client&device_id=DO_NOT_TRACK'
+        body
       });
 
       if (!response.ok) {
@@ -142,9 +194,13 @@ export class AuthManager {
       this.config.accessToken = data.access_token;
       this.config.expiresAt = Date.now() + (data.expires_in * 1000);
       this.config.scope = data.scope;
-      
+
+      // Never save password to disk
+      const configToSave = { ...this.config };
+      delete configToSave.password;
+
       // Save updated config
-      await this.save(this.config);
+      await this.save(configToSave);
     } catch (error) {
       throw new Error(`Failed to refresh access token: ${error}`);
     }
@@ -187,16 +243,39 @@ export class AuthManager {
    * Get rate limit based on auth status
    */
   getRateLimit(): number {
-    return this.isAuthenticated() ? 100 : 10;
+    if (!this.isAuthenticated()) {
+      return 10; // No auth at all
+    }
+    // Full auth with username/password: 100, app-only: 60
+    return (this.config?.username && this.config?.password) ? 100 : 60;
   }
 
   /**
    * Get cache TTL based on auth status (in ms)
    */
   getCacheTTL(): number {
-    return this.isAuthenticated() 
+    return this.isAuthenticated()
       ? 5 * 60 * 1000  // 5 minutes for authenticated
       : 15 * 60 * 1000; // 15 minutes for unauthenticated
+  }
+
+  /**
+   * Check if we have full authentication (with user credentials)
+   */
+  hasFullAuth(): boolean {
+    return this.isAuthenticated() &&
+           !!this.config?.username &&
+           !!this.config?.password;
+  }
+
+  /**
+   * Get auth mode string for display
+   */
+  getAuthMode(): string {
+    if (!this.isAuthenticated()) {
+      return 'Anonymous';
+    }
+    return this.hasFullAuth() ? 'Authenticated' : 'App-Only';
   }
 
   /**
@@ -225,7 +304,9 @@ export class AuthManager {
    * Private: Validate configuration
    */
   private isValidConfig(config: any): config is AuthConfig {
-    return config && typeof config.clientId === 'string' && config.clientId.length > 0;
+    return config &&
+           typeof config.clientId === 'string' && config.clientId.length > 0 &&
+           typeof config.clientSecret === 'string' && config.clientSecret.length > 0;
   }
 
   /**
@@ -261,14 +342,7 @@ export class AuthManager {
       throw new Error('Invalid Client ID format');
     }
     
-    const config: AuthConfig = {
-      clientId,
-      deviceId: 'DO_NOT_TRACK'
-    };
-    
-    console.log('\n✅ Setup complete! Your authentication is configured.');
-    console.log('You now have access to 100 requests per minute.\n');
-    
-    return config;
+    // This method is deprecated - use CLI setup instead
+    throw new Error('Please use "reddit-buddy --auth" for authentication setup');
   }
 }

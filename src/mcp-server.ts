@@ -36,14 +36,13 @@ export async function createMCPServer() {
   // Initialize core components
   const authManager = new AuthManager();
   await authManager.load();
-  
-  const isAuthenticated = authManager.isAuthenticated();
+
   const rateLimit = authManager.getRateLimit();
   const cacheTTL = authManager.getCacheTTL();
   const disableCache = process.env.REDDIT_BUDDY_NO_CACHE === 'true';
 
   console.error(`🚀 Reddit Buddy MCP Server v${SERVER_VERSION}`);
-  console.error(`📊 Mode: ${isAuthenticated ? 'Authenticated' : 'Anonymous'}`);
+  console.error(`📊 Mode: ${authManager.getAuthMode()}`);
   console.error(`⏱️  Rate limit: ${rateLimit} requests/minute`);
   console.error(`💾 Cache: ${disableCache ? 'Disabled' : `TTL ${cacheTTL / 60000} minutes`}`);
 
