@@ -6,7 +6,7 @@ A Model Context Protocol (MCP) server that enables Claude Desktop and other AI a
 
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![npm version](https://img.shields.io/npm/v/@karanb192/reddit-buddy-mcp.svg)](https://www.npmjs.com/package/@karanb192/reddit-buddy-mcp)
+[![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-blue)](https://nodejs.org)
 
 ## Table of Contents
@@ -41,7 +41,7 @@ Add this to your `claude_desktop_config.json`:
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["@karanb192/reddit-buddy-mcp"]
+      "args": ["reddit-mcp-buddy"]
     }
   }
 }
@@ -122,7 +122,7 @@ Want more requests? Add Reddit credentials to your Claude Desktop config:
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["@karanb192/reddit-buddy-mcp"],
+      "args": ["reddit-mcp-buddy"],
       "env": {
         "REDDIT_CLIENT_ID": "your_client_id",
         "REDDIT_CLIENT_SECRET": "your_client_secret",
@@ -158,24 +158,24 @@ This will prompt you for Reddit app credentials and save them locally. **Note: T
 To test the server directly in your terminal:
 ```bash
 # Run in HTTP mode on port 3000
-npx @karanb192/reddit-buddy-mcp --http
+npx reddit-mcp-buddy --http
 
 # Or with custom port
-REDDIT_BUDDY_PORT=8080 npx @karanb192/reddit-buddy-mcp --http
+REDDIT_BUDDY_PORT=8080 npx reddit-mcp-buddy --http
 ```
 
 **Note:** The server runs in stdio mode by default (for Claude Desktop). Use `--http` flag for testing with Postman MCP or direct API calls.
 
 ### Global Install
 ```bash
-npm install -g @karanb192/reddit-buddy-mcp
+npm install -g reddit-mcp-buddy
 reddit-buddy --http  # For testing
 ```
 
 ### From Source
 ```bash
-git clone https://github.com/karanb192/reddit-buddy-mcp.git
-cd reddit-buddy-mcp
+git clone https://github.com/karanb192/reddit-mcp-buddy.git
+cd reddit-mcp-buddy
 npm install
 npm run build
 npm link
@@ -183,7 +183,7 @@ npm link
 
 ### Using Docker
 ```bash
-docker run -it karanb192/reddit-buddy-mcp
+docker run -it karanb192/reddit-mcp-buddy
 ```
 
 ## Comparison with Other Tools
@@ -265,7 +265,7 @@ node --version
 npm --version
 
 # Try with full npx path
-$(npm bin -g)/reddit-buddy-mcp
+$(npm bin -g)/reddit-mcp-buddy
 ```
 
 **Rate limit errors**
@@ -354,9 +354,9 @@ We keep things simple:
 
 ## Support
 
-- 🐛 [Report bugs](https://github.com/karanb192/reddit-buddy-mcp/issues)
-- 💡 [Request features](https://github.com/karanb192/reddit-buddy-mcp/issues)
-- ⭐ [Star on GitHub](https://github.com/karanb192/reddit-buddy-mcp)
+- 🐛 [Report bugs](https://github.com/karanb192/reddit-mcp-buddy/issues)
+- 💡 [Request features](https://github.com/karanb192/reddit-mcp-buddy/issues)
+- ⭐ [Star on GitHub](https://github.com/karanb192/reddit-mcp-buddy)
 
 ## License
 

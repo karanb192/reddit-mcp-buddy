@@ -39,7 +39,7 @@ jobs:
           if (!pkg.name) throw new Error('Missing package name');
           if (!pkg.version) throw new Error('Missing package version');
           if (!pkg.mcpName) throw new Error('Missing mcpName field');
-          if (pkg.mcpName !== 'io.github.karanb192/reddit-buddy-mcp') {
+          if (pkg.mcpName !== 'io.github.karanb192/reddit-mcp-buddy') {
             throw new Error('Invalid mcpName: ' + pkg.mcpName);
           }
           console.log('✅ package.json is valid');
@@ -56,20 +56,25 @@ jobs:
           const server = JSON.parse(fs.readFileSync('./server.json', 'utf8'));
 
           // Check required fields
-          const required = ['name', 'version', 'description', 'deployment'];
+          const required = ['name', 'version', 'description', 'packages'];
           for (const field of required) {
             if (!server[field]) throw new Error('Missing field: ' + field);
           }
 
-          // Validate deployment structure
-          if (!server.deployment.packages || !Array.isArray(server.deployment.packages)) {
-            throw new Error('Invalid deployment.packages');
+          // Validate packages structure
+          if (!server.packages || !Array.isArray(server.packages)) {
+            throw new Error('Invalid packages array');
+          }
+
+          // Verify package name matches expected
+          if (server.name !== 'io.github.karanb192/reddit-mcp-buddy') {
+            throw new Error('Invalid server name: ' + server.name);
           }
 
           console.log('✅ server.json is valid');
           console.log('  Name:', server.name);
           console.log('  Version:', server.version);
-          console.log('  Packages:', server.deployment.packages.length);
+          console.log('  Packages:', server.packages.length);
           "
 
       - name: Test NPM publish (dry run)

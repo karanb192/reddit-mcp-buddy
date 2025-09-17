@@ -1,12 +1,12 @@
 {
-  "name": "@karanb192/reddit-buddy-mcp",
-  "version": "1.0.6-test.7",
+  "name": "reddit-mcp-buddy",
+  "version": "1.1.0",
   "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
   "main": "dist/index.js",
-  "mcpName": "io.github.karanb192/reddit-buddy-mcp",
+  "mcpName": "io.github.karanb192/reddit-mcp-buddy",
   "bin": {
     "reddit-buddy": "./dist/cli.js",
-    "reddit-buddy-mcp": "./dist/cli.js"
+    "reddit-mcp-buddy": "./dist/cli.js"
   },
   "type": "module",
   "scripts": {
@@ -18,9 +18,9 @@
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "docker:build": "docker build -t reddit-buddy-mcp .",
-    "docker:run": "docker run -it reddit-buddy-mcp",
-    "docker:run-http": "docker run -p 3000:3000 -e REDDIT_BUDDY_HTTP=true reddit-buddy-mcp"
+    "docker:build": "docker build -t reddit-mcp-buddy .",
+    "docker:run": "docker run -it reddit-mcp-buddy",
+    "docker:run-http": "docker run -p 3000:3000 -e REDDIT_BUDDY_HTTP=true reddit-mcp-buddy"
   },
   "keywords": [
     "reddit",
@@ -34,11 +34,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/karanb192/reddit-buddy-mcp"
+    "url": "https://github.com/karanb192/reddit-mcp-buddy"
   },
-  "homepage": "https://github.com/karanb192/reddit-buddy-mcp#readme",
+  "homepage": "https://github.com/karanb192/reddit-mcp-buddy#readme",
   "bugs": {
-    "url": "https://github.com/karanb192/reddit-buddy-mcp/issues"
+    "url": "https://github.com/karanb192/reddit-mcp-buddy/issues"
   },
   "engines": {
     "node": ">=18.0.0"
