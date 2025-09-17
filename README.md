@@ -1,4 +1,4 @@
-# 🤖 Reddit Buddy MCP
+# 🤖 Reddit MCP Buddy
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
@@ -11,7 +11,7 @@ A Model Context Protocol (MCP) server that enables Claude Desktop and other AI a
 
 ## Table of Contents
 
-- [What makes Reddit Buddy different?](#what-makes-reddit-buddy-different)
+- [What makes Reddit MCP Buddy different?](#what-makes-reddit-buddy-different)
 - [Quick Start](#quick-start-30-seconds)
 - [What can it do?](#what-can-it-do)
 - [Available Tools](#available-tools)
@@ -22,7 +22,7 @@ A Model Context Protocol (MCP) server that enables Claude Desktop and other AI a
 - [Development](#development)
 - [Support](#support)
 
-## What makes Reddit Buddy different?
+## What makes Reddit MCP Buddy different?
 
 - **🚀 Zero setup** - Works instantly, no Reddit API registration needed
 - **⚡ Up to 10x more requests** - Optional authentication increases rate limits
@@ -47,7 +47,7 @@ Add this to your `claude_desktop_config.json`:
 }
 ```
 
-That's it! Reddit Buddy is now available in Claude.
+That's it! Reddit MCP Buddy is now available in Claude.
 
 ## What can it do?
 
@@ -188,7 +188,7 @@ docker run -it karanb192/reddit-mcp-buddy
 
 ## Comparison with Other Tools
 
-| Feature | Reddit Buddy | Other MCP Tools |
+| Feature | Reddit MCP Buddy | Other MCP Tools |
 |---------|-------------|----------------|
 | **Zero Setup** | ✅ Works instantly | ❌ Requires API keys |
 | **Language** | TypeScript/Node.js | Python (most) |
@@ -206,7 +206,7 @@ docker run -it karanb192/reddit-mcp-buddy
 | App-only | 60 | 5 min | Client ID + Secret |
 | Authenticated | 100 | 5 min | All credentials |
 
-## Why Reddit Buddy?
+## Why Reddit MCP Buddy?
 
 ### What others do wrong:
 - ❌ **Fake metrics** - "sentiment scores" that are just keyword counting
@@ -306,7 +306,7 @@ $(npm bin -g)/reddit-mcp-buddy
 
 ### Smart Caching System
 
-Reddit Buddy includes intelligent caching to improve performance and reduce API calls:
+Reddit MCP Buddy includes intelligent caching to improve performance and reduce API calls:
 
 - **Memory Safe**: Hard limit of 50MB - won't affect your system performance
 - **Adaptive TTLs**: Hot posts (5min), New posts (2min), Top posts (30min)

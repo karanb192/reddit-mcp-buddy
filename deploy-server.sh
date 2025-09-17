@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Reddit Buddy MCP Server Deployment Script
+# Reddit MCP Buddy Server Deployment Script
 # Supports both local and Docker deployment
 
 set -e  # Exit on error
@@ -10,14 +10,14 @@ DEFAULT_PORT=35000
 PORT=$DEFAULT_PORT
 DEPLOYMENT_MODE="local"  # Default to local deployment
 TERMINATE_ONLY=false
-CONTAINER_NAME="reddit-buddy-mcp"
-IMAGE_NAME="reddit-buddy-mcp"
+CONTAINER_NAME="reddit-mcp-buddy"
+IMAGE_NAME="reddit-mcp-buddy"
 SERVER_PID_FILE=".server.pid"
 SERVER_PORT_FILE=".server.port"
 
 # Function to show usage
 show_help() {
-    echo "Reddit Buddy MCP Server Deployment Script"
+    echo "Reddit MCP Buddy Server Deployment Script"
     echo ""
     echo "This script can deploy the server locally (default) or in Docker."
     echo ""
@@ -99,7 +99,7 @@ terminate_local_server() {
 
 # Function to terminate Docker container
 terminate_docker_container() {
-    # Find container running Reddit Buddy MCP
+    # Find container running Reddit MCP Buddy
     EXISTING_CONTAINER=$(docker ps -a --filter "name=$CONTAINER_NAME" --format "{{.Names}}" | head -n1)
 
     if [ -n "$EXISTING_CONTAINER" ]; then
@@ -164,7 +164,7 @@ deploy_local() {
     echo ""
     echo "✅ Local deployment successful!"
     echo "======================================"
-    echo "🌐 Reddit Buddy MCP is running at: http://localhost:$PORT"
+    echo "🌐 Reddit MCP Buddy is running at: http://localhost:$PORT"
     echo "📡 MCP endpoint: http://localhost:$PORT/mcp"
     echo "🔌 Connect with Postman MCP or Claude Desktop"
     echo ""
@@ -229,7 +229,7 @@ deploy_docker() {
     echo ""
     echo "✅ Docker deployment successful!"
     echo "======================================"
-    echo "🌐 Reddit Buddy MCP is running at: http://localhost:$PORT"
+    echo "🌐 Reddit MCP Buddy is running at: http://localhost:$PORT"
     echo "📊 Container status:"
     docker ps | grep $CONTAINER_NAME
     echo ""
@@ -274,7 +274,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "🚀 Reddit Buddy MCP Server Deployment"
+echo "🚀 Reddit MCP Buddy Server Deployment"
 echo "======================================"
 
 # Terminate existing deployment based on mode

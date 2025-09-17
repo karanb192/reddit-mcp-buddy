@@ -1,11 +1,11 @@
-# Contributing to Reddit Buddy MCP
+# Contributing to Reddit MCP Buddy
 
 Thanks for your interest in contributing!
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/reddit-buddy-mcp.git`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/reddit-mcp-buddy.git`
 3. Install dependencies: `npm install`
 4. Build the project: `npm run build`
 5. Run locally: `./deploy-server.sh` (for development/testing)

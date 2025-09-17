@@ -99,7 +99,7 @@ export class RateLimiter {
     if (!authenticated) {
       return `⚠️ Rate limit reached! You get ${this.limit} requests/min without auth.
 
-Want 10x more requests? Run: reddit-buddy --auth (2-min setup)
+Want 10x more requests? Run: reddit-mcp-buddy --auth (2-min setup)
 Or wait ${stats.timeUntilReset} seconds...
 
 Cached data may still be available.`;

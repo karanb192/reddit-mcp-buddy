@@ -288,14 +288,14 @@ export class AuthManager {
       case 'win32':
         return join(
           process.env.APPDATA || join(home, 'AppData', 'Roaming'),
-          'reddit-buddy'
+          'reddit-mcp-buddy'
         );
       case 'darwin':
-        return join(home, 'Library', 'Application Support', 'reddit-buddy');
+        return join(home, 'Library', 'Application Support', 'reddit-mcp-buddy');
       default: // linux and others
         return join(
           process.env.XDG_CONFIG_HOME || join(home, '.config'),
-          'reddit-buddy'
+          'reddit-mcp-buddy'
         );
     }
   }
@@ -313,14 +313,14 @@ export class AuthManager {
    * Setup wizard for authentication
    */
   static async runSetupWizard(): Promise<AuthConfig> {
-    console.log('\n🚀 Reddit Buddy Authentication Setup\n');
+    console.log('\n🚀 Reddit MCP Buddy Authentication Setup\n');
     console.log('This will help you set up authentication for 10x more requests.\n');
     
     console.log('Step 1: Create a Reddit App');
     console.log('  1. Go to: https://www.reddit.com/prefs/apps');
     console.log('  2. Click "Create App" or "Create Another App"');
     console.log('  3. Fill in the following:');
-    console.log('     - Name: Reddit Buddy (or anything you like)');
+    console.log('     - Name: Reddit MCP Buddy (or anything you like)');
     console.log('     - App type: Select "script"');
     console.log('     - Description: Personal use');
     console.log('     - About URL: (leave blank)');
@@ -343,6 +343,6 @@ export class AuthManager {
     }
     
     // This method is deprecated - use CLI setup instead
-    throw new Error('Please use "reddit-buddy --auth" for authentication setup');
+    throw new Error('Please use "reddit-mcp-buddy --auth" for authentication setup');
   }
 }

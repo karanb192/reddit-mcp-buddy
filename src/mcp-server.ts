@@ -41,7 +41,7 @@ export async function createMCPServer() {
   const cacheTTL = authManager.getCacheTTL();
   const disableCache = process.env.REDDIT_BUDDY_NO_CACHE === 'true';
 
-  console.error(`🚀 Reddit Buddy MCP Server v${SERVER_VERSION}`);
+  console.error(`🚀 Reddit MCP Buddy Server v${SERVER_VERSION}`);
   console.error(`📊 Mode: ${authManager.getAuthMode()}`);
   console.error(`⏱️  Rate limit: ${rateLimit} requests/minute`);
   console.error(`💾 Cache: ${disableCache ? 'Disabled' : `TTL ${cacheTTL / 60000} minutes`}`);
@@ -290,7 +290,7 @@ export async function startStdioServer() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   
-  console.error('✅ Reddit Buddy MCP Server running (stdio mode)');
+  console.error('✅ Reddit MCP Buddy Server running (stdio mode)');
   console.error('💡 Reading from stdin, writing to stdout');
   
   // Cleanup on exit
@@ -356,7 +356,7 @@ export async function startHttpServer(port: number = 3000) {
     // Handle root endpoint
     if (req.url === '/' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('Reddit Buddy MCP Server (Streamable HTTP)\n');
+      res.end('Reddit MCP Buddy Server (Streamable HTTP)\n');
       return;
     }
     
@@ -398,11 +398,11 @@ export async function startHttpServer(port: number = 3000) {
   
   // Start listening
   httpServer.listen(port, () => {
-    console.error(`✅ Reddit Buddy MCP Server running (Streamable HTTP)`);
+    console.error(`✅ Reddit MCP Buddy Server running (Streamable HTTP)`);
     console.error(`🌐 Base URL: http://localhost:${port}`);
     console.error(`📡 MCP endpoint: http://localhost:${port}/mcp`);
     console.error(`🔌 Connect with Postman MCP client`);
-    console.error('💡 Tip: Run "reddit-buddy --auth" for 10x more requests\n');
+    console.error('💡 Tip: Run "reddit-mcp-buddy --auth" for 10x more requests\n');
   });
   
   // Cleanup on exit

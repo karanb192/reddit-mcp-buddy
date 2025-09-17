@@ -50,3 +50,6 @@ CLAUDE.md
 
 # Test scripts and files (local testing only)
 test*
+
+# MCP registry auth tokens
+.mcpregistry_*

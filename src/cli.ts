@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Reddit Buddy CLI
+ * Reddit MCP Buddy CLI
  * Handle authentication setup and server startup
  */
 
@@ -15,14 +15,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 async function setupAuth() {
-  console.log('\n🚀 Reddit Buddy Authentication Setup\n');
+  console.log('\n🚀 Reddit MCP Buddy Authentication Setup\n');
   console.log('This will help you set up authentication for 10x more requests.\n');
 
   console.log('Step 1: Create a Reddit App');
   console.log('  1. Open: https://www.reddit.com/prefs/apps');
   console.log('  2. Click "Create App" or "Create Another App"');
   console.log('  3. Fill in:');
-  console.log('     • Name: Reddit Buddy (or anything)');
+  console.log('     • Name: Reddit MCP Buddy (or anything)');
   console.log('     • Type: Select "script" (IMPORTANT!)');
   console.log('     • Description: Personal use');
   console.log('     • Redirect URI: http://localhost:8080');
@@ -129,8 +129,8 @@ async function setupAuth() {
         console.log('💡 Tip: Provide username/password for full 100 req/min rate limit');
       }
 
-      console.log('\nTo start using Reddit Buddy, run:');
-      console.log('  reddit-buddy\n');
+      console.log('\nTo start using Reddit MCP Buddy, run:');
+      console.log('  reddit-mcp-buddy\n');
     } catch (error: any) {
       console.error('\n❌ Failed to authenticate. Please check:');
       console.error('  • Client ID and Secret are correct');
@@ -195,20 +195,20 @@ if (args.includes('--auth') || args.includes('-a')) {
     process.exit(1);
   });
 } else if (args.includes('--help') || args.includes('-h')) {
-  console.log('Reddit Buddy - Your AI assistant\'s best friend for browsing Reddit\n');
+  console.log('Reddit MCP Buddy - Your AI assistant\'s best friend for browsing Reddit\n');
   console.log('Usage:');
-  console.log('  reddit-buddy           Start the MCP server');
-  console.log('  reddit-buddy --auth    Set up Reddit authentication (optional)');
-  console.log('  reddit-buddy --help    Show this help message\n');
+  console.log('  reddit-mcp-buddy           Start the MCP server');
+  console.log('  reddit-mcp-buddy --auth    Set up Reddit authentication (optional)');
+  console.log('  reddit-mcp-buddy --help    Show this help message\n');
   console.log('Features:');
   console.log('  • Browse subreddits with smart summaries');
   console.log('  • Search Reddit with advanced filters');
   console.log('  • Analyze trends and sentiment');
   console.log('  • Compare opinions across subreddits');
   console.log('  • And much more!\n');
-  console.log('Learn more: https://github.com/karanb192/reddit-buddy');
+  console.log('Learn more: https://github.com/karanb192/reddit-mcp-buddy');
 } else if (args.includes('--version') || args.includes('-v')) {
-  console.log('Reddit Buddy v1.0.3');
+  console.log('Reddit MCP Buddy v1.1.0');
 } else {
   // Start the server
   startServer().catch((error) => {
