@@ -1,5 +1,5 @@
 /**
- * Reddit Buddy MCP Server
+ * Reddit MCP Buddy Server
  * Main entry point
  */
 

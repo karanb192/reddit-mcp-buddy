@@ -1,4 +1,4 @@
-# 🤖 Reddit Buddy MCP
+# 🤖 Reddit MCP Buddy
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
@@ -6,12 +6,12 @@ A Model Context Protocol (MCP) server that enables Claude Desktop and other AI a
 
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![npm version](https://img.shields.io/npm/v/@karanb192/reddit-buddy-mcp.svg)](https://www.npmjs.com/package/@karanb192/reddit-buddy-mcp)
+[![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-blue)](https://nodejs.org)
 
 ## Table of Contents
 
-- [What makes Reddit Buddy different?](#what-makes-reddit-buddy-different)
+- [What makes Reddit MCP Buddy different?](#what-makes-reddit-buddy-different)
 - [Quick Start](#quick-start-30-seconds)
 - [What can it do?](#what-can-it-do)
 - [Available Tools](#available-tools)
@@ -22,10 +22,10 @@ A Model Context Protocol (MCP) server that enables Claude Desktop and other AI a
 - [Development](#development)
 - [Support](#support)
 
-## What makes Reddit Buddy different?
+## What makes Reddit MCP Buddy different?
 
 - **🚀 Zero setup** - Works instantly, no Reddit API registration needed
-- **⚡ 10x faster** - Optional authentication gives you 10x more requests
+- **⚡ Up to 10x more requests** - Optional authentication increases rate limits
 - **🎯 Clean data** - No fake "sentiment analysis" or made-up metrics
 - **🧠 LLM-optimized** - Built specifically for AI assistants like Claude
 - **📦 TypeScript** - Fully typed, reliable, and maintainable
@@ -41,13 +41,13 @@ Add this to your `claude_desktop_config.json`:
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["@karanb192/reddit-buddy-mcp"]
+      "args": ["reddit-mcp-buddy"]
     }
   }
 }
 ```
 
-That's it! Reddit Buddy is now available in Claude.
+That's it! Reddit MCP Buddy is now available in Claude.
 
 ## What can it do?
 
@@ -106,61 +106,76 @@ Get explanations of Reddit terms.
 
 ## Authentication (Optional)
 
-Want 10x more requests? Add Reddit credentials:
+Want more requests? Add Reddit credentials to your Claude Desktop config:
+
+### Setup Steps
 
 1. Go to https://www.reddit.com/prefs/apps
-2. Create an app (type: script)
-3. Add credentials to `.env`:
-
-```env
-REDDIT_CLIENT_ID=your_client_id
-REDDIT_CLIENT_SECRET=your_client_secret
-REDDIT_USER_AGENT=YourApp/1.0
-```
-
-4. Update your Claude config:
+2. Create an app (type: **script** - IMPORTANT!)
+3. Find your credentials:
+   - **Client ID**: Shows under "personal use script"
+   - **Client Secret**: The secret string on the app page
+4. Update your Claude Desktop config:
 
 ```json
 {
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["reddit-buddy-mcp"],
+      "args": ["reddit-mcp-buddy"],
       "env": {
         "REDDIT_CLIENT_ID": "your_client_id",
         "REDDIT_CLIENT_SECRET": "your_client_secret",
-        "REDDIT_USER_AGENT": "YourApp/1.0"
+        "REDDIT_USERNAME": "your_username",
+        "REDDIT_PASSWORD": "your_password"
       }
     }
   }
 }
 ```
 
-## Installation Options
+### Rate Limits
 
-### Testing with HTTP Mode (for developers)
+- **No auth**: 10 requests/minute (default)
+- **Client ID + Secret only**: 60 requests/minute
+- **With username + password**: 100 requests/minute
+
+**Note**: For maximum rate limits (100 req/min), you need all four credentials including username and password.
+
+## Testing & Development
+
+### Interactive Authentication Setup (for local testing only)
+
+For local development and testing, you can set up authentication interactively:
+```bash
+npx reddit-buddy --auth
+```
+
+This will prompt you for Reddit app credentials and save them locally. **Note: This does NOT work with Claude Desktop** - use environment variables in your Claude config instead.
+
+### Testing with HTTP Mode
 
 To test the server directly in your terminal:
 ```bash
 # Run in HTTP mode on port 3000
-npx @karanb192/reddit-buddy-mcp --http
+npx reddit-mcp-buddy --http
 
 # Or with custom port
-REDDIT_BUDDY_PORT=8080 npx @karanb192/reddit-buddy-mcp --http
+REDDIT_BUDDY_PORT=8080 npx reddit-mcp-buddy --http
 ```
 
 **Note:** The server runs in stdio mode by default (for Claude Desktop). Use `--http` flag for testing with Postman MCP or direct API calls.
 
 ### Global Install
 ```bash
-npm install -g @karanb192/reddit-buddy-mcp
+npm install -g reddit-mcp-buddy
 reddit-buddy --http  # For testing
 ```
 
 ### From Source
 ```bash
-git clone https://github.com/karanb192/reddit-buddy-mcp.git
-cd reddit-buddy-mcp
+git clone https://github.com/karanb192/reddit-mcp-buddy.git
+cd reddit-mcp-buddy
 npm install
 npm run build
 npm link
@@ -168,12 +183,12 @@ npm link
 
 ### Using Docker
 ```bash
-docker run -it karanb192/reddit-buddy-mcp
+docker run -it karanb192/reddit-mcp-buddy
 ```
 
 ## Comparison with Other Tools
 
-| Feature | Reddit Buddy | Other MCP Tools |
+| Feature | Reddit MCP Buddy | Other MCP Tools |
 |---------|-------------|----------------|
 | **Zero Setup** | ✅ Works instantly | ❌ Requires API keys |
 | **Language** | TypeScript/Node.js | Python (most) |
@@ -185,12 +200,13 @@ docker run -it karanb192/reddit-buddy-mcp
 
 ## Rate Limits
 
-| Mode | Requests/Minute | Cache TTL |
-|------|----------------|-----------|
-| Anonymous | 10 | 15 min |
-| Authenticated | 100 | 5 min |
+| Mode | Requests/Minute | Cache TTL | Setup Required |
+|------|----------------|-----------|----------------|
+| Anonymous | 10 | 15 min | None |
+| App-only | 60 | 5 min | Client ID + Secret |
+| Authenticated | 100 | 5 min | All credentials |
 
-## Why Reddit Buddy?
+## Why Reddit MCP Buddy?
 
 ### What others do wrong:
 - ❌ **Fake metrics** - "sentiment scores" that are just keyword counting
@@ -249,11 +265,13 @@ node --version
 npm --version
 
 # Try with full npx path
-$(npm bin -g)/reddit-buddy-mcp
+$(npm bin -g)/reddit-mcp-buddy
 ```
 
 **Rate limit errors**
 - Without auth: Limited to 10 requests/minute
+- With app credentials only: 60 requests/minute
+- With full authentication: 100 requests/minute
 - Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
 
 **"Subreddit not found"**
@@ -268,19 +286,27 @@ $(npm bin -g)/reddit-buddy-mcp
 
 ### Environment Variables
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `REDDIT_CLIENT_ID` | Reddit app client ID | No | - |
-| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | - |
-| `REDDIT_USER_AGENT` | User agent string | No | `RedditBuddy/1.0` |
-| `REDDIT_BUDDY_HTTP` | Run as HTTP server | No | `false` |
-| `REDDIT_BUDDY_NO_CACHE` | Disable caching (always fetch fresh) | No | `false` |
+#### Authentication Variables
+| Variable | Description | Required | Rate Limit |
+|----------|-------------|----------|------------|
+| `REDDIT_CLIENT_ID` | Reddit app client ID | No | 60 req/min (with secret) |
+| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | 60 req/min (with ID) |
+| `REDDIT_USERNAME` | Reddit account username | No | 100 req/min (with all 4) |
+| `REDDIT_PASSWORD` | Reddit account password | No | 100 req/min (with all 4) |
+| `REDDIT_USER_AGENT` | User agent string | No | - |
+
+#### Server Configuration
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REDDIT_BUDDY_HTTP` | Run as HTTP server instead of stdio | `false` |
+| `REDDIT_BUDDY_PORT` | HTTP server port (when HTTP=true) | `3000` |
+| `REDDIT_BUDDY_NO_CACHE` | Disable caching (always fetch fresh) | `false` |
 
 ## Technical Details
 
 ### Smart Caching System
 
-Reddit Buddy includes intelligent caching to improve performance and reduce API calls:
+Reddit MCP Buddy includes intelligent caching to improve performance and reduce API calls:
 
 - **Memory Safe**: Hard limit of 50MB - won't affect your system performance
 - **Adaptive TTLs**: Hot posts (5min), New posts (2min), Top posts (30min)
@@ -328,9 +354,9 @@ We keep things simple:
 
 ## Support
 
-- 🐛 [Report bugs](https://github.com/karanb192/reddit-buddy-mcp/issues)
-- 💡 [Request features](https://github.com/karanb192/reddit-buddy-mcp/issues)
-- ⭐ [Star on GitHub](https://github.com/karanb192/reddit-buddy-mcp)
+- 🐛 [Report bugs](https://github.com/karanb192/reddit-mcp-buddy/issues)
+- 💡 [Request features](https://github.com/karanb192/reddit-mcp-buddy/issues)
+- ⭐ [Star on GitHub](https://github.com/karanb192/reddit-mcp-buddy)
 
 ## License
 

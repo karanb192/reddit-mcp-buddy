@@ -364,7 +364,7 @@ export class RedditAPI {
           // Retry with new token
           return this.get<T>(endpoint, retries - 1);
         } catch (refreshError) {
-          throw new Error('Authentication failed. Please run: reddit-buddy --auth');
+          throw new Error('Authentication failed. Please run: reddit-mcp-buddy --auth');
         }
       }
 
