@@ -25,7 +25,7 @@ A Model Context Protocol (MCP) server that enables Claude Desktop and other AI a
 ## What makes Reddit Buddy different?
 
 - **🚀 Zero setup** - Works instantly, no Reddit API registration needed
-- **⚡ 10x faster** - Optional authentication gives you 10x more requests
+- **⚡ Up to 10x more requests** - Optional authentication increases rate limits
 - **🎯 Clean data** - No fake "sentiment analysis" or made-up metrics
 - **🧠 LLM-optimized** - Built specifically for AI assistants like Claude
 - **📦 TypeScript** - Fully typed, reliable, and maintainable
@@ -106,23 +106,16 @@ Get explanations of Reddit terms.
 
 ## Authentication (Optional)
 
-Want 10x more requests? Add Reddit credentials for enhanced rate limits:
+Want more requests? Add Reddit credentials to your Claude Desktop config:
 
-### Option 1: Interactive Setup (Recommended)
-```bash
-npx reddit-buddy --auth
-```
-
-Follow the prompts to enter your Reddit app credentials. This supports:
-- **Anonymous mode**: 10 requests/minute (no setup needed)
-- **App-only mode**: 60 requests/minute (client ID + secret)
-- **Authenticated mode**: 100 requests/minute (full credentials)
-
-### Option 2: Environment Variables (for Claude Desktop)
+### Setup Steps
 
 1. Go to https://www.reddit.com/prefs/apps
 2. Create an app (type: **script** - IMPORTANT!)
-3. Update your Claude Desktop config:
+3. Find your credentials:
+   - **Client ID**: Shows under "personal use script"
+   - **Client Secret**: The secret string on the app page
+4. Update your Claude Desktop config:
 
 ```json
 {
@@ -141,11 +134,26 @@ Follow the prompts to enter your Reddit app credentials. This supports:
 }
 ```
 
-**Note**: For full 100 req/min rate limit, you need username + password. Without them, you get 60 req/min (app-only mode).
+### Rate Limits
 
-## Installation Options
+- **No auth**: 10 requests/minute (default)
+- **Client ID + Secret only**: 60 requests/minute
+- **With username + password**: 100 requests/minute
 
-### Testing with HTTP Mode (for developers)
+**Note**: For maximum rate limits (100 req/min), you need all four credentials including username and password.
+
+## Testing & Development
+
+### Interactive Authentication Setup (for local testing only)
+
+For local development and testing, you can set up authentication interactively:
+```bash
+npx reddit-buddy --auth
+```
+
+This will prompt you for Reddit app credentials and save them locally. **Note: This does NOT work with Claude Desktop** - use environment variables in your Claude config instead.
+
+### Testing with HTTP Mode
 
 To test the server directly in your terminal:
 ```bash
@@ -192,10 +200,11 @@ docker run -it karanb192/reddit-buddy-mcp
 
 ## Rate Limits
 
-| Mode | Requests/Minute | Cache TTL |
-|------|----------------|-----------|
-| Anonymous | 10 | 15 min |
-| Authenticated | 100 | 5 min |
+| Mode | Requests/Minute | Cache TTL | Setup Required |
+|------|----------------|-----------|----------------|
+| Anonymous | 10 | 15 min | None |
+| App-only | 60 | 5 min | Client ID + Secret |
+| Authenticated | 100 | 5 min | All credentials |
 
 ## Why Reddit Buddy?
 
@@ -261,6 +270,8 @@ $(npm bin -g)/reddit-buddy-mcp
 
 **Rate limit errors**
 - Without auth: Limited to 10 requests/minute
+- With app credentials only: 60 requests/minute
+- With full authentication: 100 requests/minute
 - Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
 
 **"Subreddit not found"**
@@ -275,13 +286,21 @@ $(npm bin -g)/reddit-buddy-mcp
 
 ### Environment Variables
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `REDDIT_CLIENT_ID` | Reddit app client ID | No | - |
-| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | - |
-| `REDDIT_USER_AGENT` | User agent string | No | `RedditBuddy/1.0` |
-| `REDDIT_BUDDY_HTTP` | Run as HTTP server | No | `false` |
-| `REDDIT_BUDDY_NO_CACHE` | Disable caching (always fetch fresh) | No | `false` |
+#### Authentication Variables
+| Variable | Description | Required | Rate Limit |
+|----------|-------------|----------|------------|
+| `REDDIT_CLIENT_ID` | Reddit app client ID | No | 60 req/min (with secret) |
+| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | 60 req/min (with ID) |
+| `REDDIT_USERNAME` | Reddit account username | No | 100 req/min (with all 4) |
+| `REDDIT_PASSWORD` | Reddit account password | No | 100 req/min (with all 4) |
+| `REDDIT_USER_AGENT` | User agent string | No | - |
+
+#### Server Configuration
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REDDIT_BUDDY_HTTP` | Run as HTTP server instead of stdio | `false` |
+| `REDDIT_BUDDY_PORT` | HTTP server port (when HTTP=true) | `3000` |
+| `REDDIT_BUDDY_NO_CACHE` | Disable caching (always fetch fresh) | `false` |
 
 ## Technical Details
 
