@@ -1,0 +1,18 @@
+# Environment files with credentials
+.env
+.env.local
+.env.*.local
+
+# Test scripts with hardcoded credentials
+test-reddit-auth.cjs
+test-auth.py
+*-with-creds.cjs
+*-with-creds.py
+
+# Temporary test files
+*.tmp
+*.test
+
+# Personal test scripts
+my-*.cjs
+my-*.py
