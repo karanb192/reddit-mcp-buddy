@@ -2,12 +2,11 @@
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
-A Model Context Protocol (MCP) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - no API keys required.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - no API keys required.
 
-[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dreddit-mcp-buddy&query=%24.servers%5B-1%3A%5D.version&label=MCP%20Registry&color=blue)](https://registry.modelcontextprotocol.io/v0/servers/5677b351-373d-4137-bc58-28f1ba0d105d)
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-blue)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ## Table of Contents
 
@@ -21,6 +20,7 @@ A Model Context Protocol (MCP) server that enables Claude Desktop and other AI a
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 - [Support](#support)
+- [Related Resources](#-related-resources)
 
 ## What makes Reddit MCP Buddy different?
 
@@ -414,6 +414,31 @@ We keep things simple:
 - 🐛 [Report bugs](https://github.com/karanb192/reddit-mcp-buddy/issues)
 - 💡 [Request features](https://github.com/karanb192/reddit-mcp-buddy/issues)
 - ⭐ [Star on GitHub](https://github.com/karanb192/reddit-mcp-buddy)
+
+## 🔗 Related Resources
+
+### Official MCP Resources
+- **[MCP Registry](https://registry.modelcontextprotocol.io)** - Official registry of MCP servers
+- **[MCP Specification](https://spec.modelcontextprotocol.io)** - Official Model Context Protocol specification
+- **[MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)** - SDK used to build this server
+- **[MCP Servers Repository](https://github.com/modelcontextprotocol/servers)** - Collection of official MCP server implementations
+- **[Awesome MCP Servers](https://github.com/modelcontextprotocol/awesome-mcp-servers)** - Community-curated list of MCP servers
+
+### Where to Find This Server
+- **[MCP Registry Direct Link](https://registry.modelcontextprotocol.io/v0/servers/5677b351-373d-4137-bc58-28f1ba0d105d)** - Direct API link to v1.1.1
+- **[MCP Registry Search](https://registry.modelcontextprotocol.io)** - Search for "reddit" to find all versions
+- **[NPM Package](https://www.npmjs.com/package/reddit-mcp-buddy)** - Install via npm/npx
+- **[GitHub Repository](https://github.com/karanb192/reddit-mcp-buddy)** - Source code and issues
+
+#### View All Versions via API
+```bash
+# Get all versions of reddit-mcp-buddy from the registry
+curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=reddit-mcp-buddy" | jq
+
+# Get just version numbers and UUIDs
+curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=reddit-mcp-buddy" | \
+  jq '.servers[] | {version, id: ._meta."io.modelcontextprotocol.registry/official".id}'
+```
 
 ## License
 
