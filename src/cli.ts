@@ -6,6 +6,7 @@
  */
 
 import { AuthManager } from './core/auth.js';
+import { SERVER_VERSION } from './mcp-server.js';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -208,7 +209,7 @@ if (args.includes('--auth') || args.includes('-a')) {
   console.log('  • And much more!\n');
   console.log('Learn more: https://github.com/karanb192/reddit-mcp-buddy');
 } else if (args.includes('--version') || args.includes('-v')) {
-  console.log('Reddit MCP Buddy v1.1.0');
+  console.log(`Reddit MCP Buddy v${SERVER_VERSION}`);
 } else {
   // Start the server
   startServer().catch((error) => {

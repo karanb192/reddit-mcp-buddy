@@ -25,10 +25,11 @@ A Model Context Protocol (MCP) server that enables Claude Desktop and other AI a
 ## What makes Reddit MCP Buddy different?
 
 - **🚀 Zero setup** - Works instantly, no Reddit API registration needed
-- **⚡ Up to 10x more requests** - Optional authentication increases rate limits
+- **⚡ Up to 10x more requests** - Three-tier authentication system (10/60/100 requests per minute)
 - **🎯 Clean data** - No fake "sentiment analysis" or made-up metrics
 - **🧠 LLM-optimized** - Built specifically for AI assistants like Claude
 - **📦 TypeScript** - Fully typed, reliable, and maintainable
+- **✅ Proven rate limits** - Thoroughly tested authentication tiers with verification tools
 
 ## Quick Start (30 seconds)
 
@@ -110,12 +111,19 @@ Want more requests? Add Reddit credentials to your Claude Desktop config:
 
 ### Setup Steps
 
-1. Go to https://www.reddit.com/prefs/apps
-2. Create an app (type: **script** - IMPORTANT!)
-3. Find your credentials:
-   - **Client ID**: Shows under "personal use script"
-   - **Client Secret**: The secret string on the app page
-4. Update your Claude Desktop config:
+1. **Go to** https://www.reddit.com/prefs/apps
+2. **Click** "Create App" or "Create Another App"
+3. **Fill out the form:**
+   - **Name**: Any name (e.g., "reddit-mcp-buddy")
+   - **App type**: Select **"script"** (CRITICAL for 100 rpm!)
+   - **Description**: Optional
+   - **About URL**: Leave blank
+   - **Redirect URI**: `http://localhost:8080` (required but unused)
+4. **Click** "Create app"
+5. **Find your credentials:**
+   - **Client ID**: The string under "personal use script"
+   - **Client Secret**: The secret string
+6. **Update your Claude Desktop config:**
 
 ```json
 {
@@ -134,21 +142,59 @@ Want more requests? Add Reddit credentials to your Claude Desktop config:
 }
 ```
 
-### Rate Limits
+### Three-Tier Authentication System
 
-- **No auth**: 10 requests/minute (default)
-- **Client ID + Secret only**: 60 requests/minute
-- **With username + password**: 100 requests/minute
+Reddit MCP Buddy supports three authentication levels, each with different rate limits:
 
-**Note**: For maximum rate limits (100 req/min), you need all four credentials including username and password.
+| Mode | Rate Limit | Required Credentials | Best For |
+|------|------------|---------------------|----------|
+| **Anonymous** | 10 req/min | None | Testing, light usage |
+| **App-Only** | 60 req/min | Client ID + Secret | Regular browsing |
+| **Authenticated** | 100 req/min | All 4 credentials | Heavy usage, automation |
+
+#### How It Works:
+- **Anonymous Mode**: Default mode, no setup required, uses public Reddit API
+- **App-Only Mode**: Uses OAuth2 client credentials grant (works with both script and web apps)
+- **Authenticated Mode**: Uses OAuth2 password grant (requires script app type)
+
+**Important Notes**:
+- Script apps support BOTH app-only (60 rpm) and authenticated (100 rpm) modes
+- Web apps only support app-only mode (60 rpm maximum)
+- For 100 requests/minute, you MUST use a script app with username + password
 
 ## Testing & Development
+
+### Testing Your Rate Limits
+
+Reddit MCP Buddy includes comprehensive testing tools to verify your authentication is working correctly:
+
+```bash
+# Clone the repository first
+git clone https://github.com/karanb192/reddit-mcp-buddy.git
+cd reddit-mcp-buddy
+npm install
+
+# Test with your current environment settings
+npm run test:rate-limit
+
+# Test specific authentication modes
+npm run test:rate-limit:anon    # Test anonymous mode (10 rpm)
+npm run test:rate-limit:app     # Test app-only mode (60 rpm)
+npm run test:rate-limit:auth    # Test authenticated mode (100 rpm)
+```
+
+The rate limit tester will:
+- Start a local server instance
+- Make rapid API requests to test rate limits
+- Display a real-time progress bar
+- Confirm which authentication tier you're using
+- Show exactly when rate limiting kicks in
 
 ### Interactive Authentication Setup (for local testing only)
 
 For local development and testing, you can set up authentication interactively:
 ```bash
-npx reddit-buddy --auth
+npx reddit-mcp-buddy --auth
 ```
 
 This will prompt you for Reddit app credentials and save them locally. **Note: This does NOT work with Claude Desktop** - use environment variables in your Claude config instead.
@@ -191,12 +237,14 @@ docker run -it karanb192/reddit-mcp-buddy
 | Feature | Reddit MCP Buddy | Other MCP Tools |
 |---------|-------------|----------------|
 | **Zero Setup** | ✅ Works instantly | ❌ Requires API keys |
+| **Max Rate Limit** | ✅ 100 req/min proven | ❓ Unverified claims |
 | **Language** | TypeScript/Node.js | Python (most) |
 | **Tools Count** | 5 (focused) | 8-10 (redundant) |
 | **Fake Metrics** | ✅ Real data only | ❌ "Sentiment scores" |
 | **Search** | ✅ Full search | Limited or none |
 | **Caching** | ✅ Smart caching | Usually none |
 | **LLM Optimized** | ✅ Clear params | Confusing options |
+| **Rate Limit Testing** | ✅ Built-in tools | ❌ No verification |
 
 ## Rate Limits
 
@@ -257,6 +305,12 @@ docker run -it karanb192/reddit-mcp-buddy
 ## Troubleshooting
 
 ### Common Issues
+
+**"Can't achieve 100 requests/minute"**
+- Ensure your app type is **"script"** not "web" or "installed"
+- Script apps created by one account can only authenticate as that same account
+- Run `npm run test:rate-limit:auth` to verify (requires cloning the repo)
+- If still failing, create a new script app while logged into the authenticating account
 
 **"Command not found" error**
 ```bash
@@ -327,8 +381,11 @@ npm run dev
 # Build
 npm run build
 
-# Test
-npm test
+# Test rate limits
+npm run test:rate-limit       # Test with current environment
+npm run test:rate-limit:anon  # Test anonymous mode (10 rpm)
+npm run test:rate-limit:app   # Test app-only mode (60 rpm)
+npm run test:rate-limit:auth  # Test authenticated mode (100 rpm)
 
 # Lint
 npm run lint
