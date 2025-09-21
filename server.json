@@ -11,9 +11,14 @@
   "license": "MIT",
   "homepage": "https://github.com/karanb192/reddit-mcp-buddy",
   "bugs": "https://github.com/karanb192/reddit-mcp-buddy/issues",
+  "repository": {
+    "id": "1056452116",
+    "url": "https://github.com/karanb192/reddit-mcp-buddy",
+    "source": "github"
+  },
   "packages": [
     {
-      "registry_type": "npm",
+      "registryType": "npm",
       "identifier": "reddit-mcp-buddy",
       "version": "1.1.6",
       "transport": {
