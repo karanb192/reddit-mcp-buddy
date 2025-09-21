@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "io.github.karanb192/reddit-mcp-buddy",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Reddit browser for AI assistants. Browse posts, search content, analyze users. No API keys needed.",
   "author": {
     "name": "Karan Bansal",
@@ -18,9 +18,9 @@
   },
   "packages": [
     {
-      "registryType": "npm",
+      "registry_type": "npm",
       "identifier": "reddit-mcp-buddy",
-      "version": "1.1.4",
+      "version": "1.1.5",
       "transport": {
         "type": "stdio"
       }
