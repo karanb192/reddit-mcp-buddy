@@ -12,8 +12,8 @@
   "homepage": "https://github.com/karanb192/reddit-mcp-buddy",
   "bugs": "https://github.com/karanb192/reddit-mcp-buddy/issues",
   "repository": {
-    "type": "git",
-    "url": "https://github.com/karanb192/reddit-mcp-buddy"
+    "url": "https://github.com/karanb192/reddit-mcp-buddy",
+    "source": "github"
   },
   "packages": [
     {
