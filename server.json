@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "io.github.karanb192/reddit-mcp-buddy",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Reddit browser for Claude Desktop and AI assistants. Browse subreddits, search posts, analyze users, and get Reddit insights. Zero setup required - works instantly with optional authentication for 10x more requests.",
   "author": {
     "name": "Karan Bansal",
@@ -11,11 +11,16 @@
   "license": "MIT",
   "homepage": "https://github.com/karanb192/reddit-mcp-buddy",
   "bugs": "https://github.com/karanb192/reddit-mcp-buddy/issues",
+  "repository": {
+    "id": 1056452116,
+    "url": "https://github.com/karanb192/reddit-mcp-buddy",
+    "source": "github"
+  },
   "packages": [
     {
       "registry_type": "npm",
       "identifier": "reddit-mcp-buddy",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "transport": {
         "type": "stdio"
       }
