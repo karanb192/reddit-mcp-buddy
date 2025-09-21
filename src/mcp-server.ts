@@ -27,7 +27,7 @@ import {
 
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
-export const SERVER_VERSION = '1.1.4';
+export const SERVER_VERSION = '1.1.5';
 
 /**
  * Create MCP server with proper protocol implementation
