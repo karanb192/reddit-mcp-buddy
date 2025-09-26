@@ -32,7 +32,7 @@ export class RedditAPI {
     this.auth = options.authManager;
     this.rateLimiter = options.rateLimiter;
     this.cache = options.cacheManager;
-    this.timeout = options.timeout ?? 5000;
+    this.timeout = options.timeout ?? 10000; // Increased timeout to 10 seconds
   }
 
   /**
@@ -416,15 +416,47 @@ export class RedditAPI {
       
     } catch (error: any) {
       clearTimeout(timeoutId);
-      
+
+      // Log the actual error for debugging
+      console.error('Reddit API Error:', error.message || error);
+
       if (error.name === 'AbortError') {
-        throw new Error('Request timeout - Reddit may be slow. Please try again.');
+        throw new Error('Request timeout (10s exceeded) - Reddit may be slow or unreachable. Try again or check if Reddit is blocked on your network.');
       }
-      
+
+      // Common network errors
+      if (error.code === 'ENOTFOUND') {
+        throw new Error('Cannot resolve Reddit domain - check DNS settings or if Reddit is blocked by your ISP/firewall');
+      }
+
+      if (error.code === 'ECONNREFUSED') {
+        throw new Error('Connection refused - Reddit may be blocked by firewall or network policy');
+      }
+
+      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+        throw new Error('Connection timeout - Reddit may be blocked or network is unstable');
+      }
+
+      if (error.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') {
+        throw new Error('SSL certificate error - may be caused by proxy or firewall');
+      }
+
+      // Fetch-specific errors
+      if (error.cause?.code === 'ENOTFOUND') {
+        throw new Error(`Cannot reach Reddit servers - ${error.cause.hostname || 'reddit.com'} is not accessible. Check if Reddit is blocked in your region/network.`);
+      }
+
+      if (error.message?.includes('fetch failed')) {
+        // Extract more details from the fetch error
+        const details = error.cause ? ` (${error.cause.code || error.cause.message})` : '';
+        throw new Error(`Failed to connect to Reddit${details}. Common causes: firewall blocking, geo-restriction, or ISP blocking Reddit.`);
+      }
+
       if (error.message?.includes('fetch')) {
-        throw new Error('Network error - please check your internet connection');
+        throw new Error(`Network error accessing Reddit: ${error.message}. If Reddit works in your browser, try using a VPN.`);
       }
-      
+
+      // Pass through the original error if we don't have a specific handler
       throw error;
     }
   }
