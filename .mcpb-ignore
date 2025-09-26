@@ -1,0 +1,71 @@
+# Development files
+*.ts
+*.tsx
+src/
+tests/
+*.test.js
+*.spec.js
+CLAUDE.md
+CONTRIBUTING.md
+
+# Git
+.git/
+.github/
+.gitignore
+
+# Build and config
+tsconfig.json
+.eslintrc*
+jest.config.js
+smithery.yaml
+Dockerfile
+deploy-server.sh
+
+# Local files
+.env
+.env.local
+auth.json
+.claude/
+.server.pid
+.server.port
+.docker-port
+local-files/
+
+# Working documents
+*.md
+!README.md
+all-mcp-servers.json
+claude-config-comment.md
+final-*.md
+linkedin-*.md
+post.md
+reddit-posts-clean.md
+*-strategy.md
+*-version.md
+LocalLLaMA.md
+ClaudeAI.md
+programming.md
+v*.md
+video-*.md
+screenshot-*.md
+
+# Media files (large)
+assets/images/*.gif
+*.gif
+
+# Temp files
+*.log
+*.tmp
+.DS_Store
+
+# Node modules (we'll bundle only what's needed)
+node_modules/.bin/
+node_modules/.cache/
+
+# Test files
+test/
+tests/
+coverage/
+
+# Registry tokens
+.mcpregistry_*
