@@ -8,6 +8,12 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
+## 🎬 See It In Action
+
+![Reddit MCP Buddy Demo - Analyzing H1B sentiment across subreddits](reddit-mcp-buddy.gif)
+
+*Claude analyzing real-time sentiment about H-1B visa changes across r/cscareerquestions and r/india*
+
 ## Table of Contents
 
 - [What makes Reddit MCP Buddy different?](#what-makes-reddit-buddy-different)
