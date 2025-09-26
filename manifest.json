@@ -7,6 +7,7 @@
     "name": "Karan Bansal",
     "email": "karanb192@gmail.com"
   },
+  "icon": "icon.png",
   "homepage": "https://github.com/karanb192/reddit-mcp-buddy",
   "license": "MIT",
   "server": {

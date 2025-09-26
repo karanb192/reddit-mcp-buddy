@@ -1,0 +1,31 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="64" fill="#FF4500"/>
+
+  <!-- Gradient for depth -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF4500;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#CC3700;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="64" fill="url(#bgGradient)"/>
+
+  <!-- MCP connection dots -->
+  <circle cx="150" cy="200" r="20" fill="white" opacity="0.9"/>
+  <circle cx="256" cy="150" r="20" fill="white" opacity="0.9"/>
+  <circle cx="362" cy="200" r="20" fill="white" opacity="0.9"/>
+
+  <!-- Connecting lines -->
+  <line x1="150" y1="200" x2="256" y2="150" stroke="white" stroke-width="4" opacity="0.7"/>
+  <line x1="256" y1="150" x2="362" y2="200" stroke="white" stroke-width="4" opacity="0.7"/>
+
+  <!-- Search/Browse circle -->
+  <circle cx="256" cy="300" r="80" fill="none" stroke="white" stroke-width="20"/>
+  <line x1="310" y1="354" x2="380" y2="424" stroke="white" stroke-width="20" stroke-linecap="round"/>
+
+  <!-- Reddit-style antenna -->
+  <circle cx="256" cy="300" r="8" fill="white"/>
+  <line x1="256" y1="300" x2="256" y2="260" stroke="white" stroke-width="4"/>
+  <circle cx="256" cy="255" r="6" fill="white"/>
+</svg>
