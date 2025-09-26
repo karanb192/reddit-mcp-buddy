@@ -10,7 +10,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## 🎬 See It In Action
 
-![Reddit MCP Buddy Demo - Analyzing H1B sentiment across subreddits](reddit-mcp-buddy.gif)
+![Reddit MCP Buddy Demo - Analyzing H1B sentiment across subreddits](assets/images/reddit-mcp-buddy.gif)
 
 *Claude analyzing real-time sentiment about H-1B visa changes across r/cscareerquestions and r/india*
 
