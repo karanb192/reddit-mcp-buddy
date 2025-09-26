@@ -53,3 +53,21 @@ test*
 
 # MCP registry auth tokens
 .mcpregistry_*
+
+# Working documents and guides (now in local-files/)
+linkedin-*.md
+final-*.md
+post.md
+reddit-posts-clean.md
+*-strategy.md
+*-version.md
+LocalLLaMA.md
+ClaudeAI.md
+programming.md
+v*.md
+all-mcp-servers.json
+claude-config-comment.md
+
+# MCPB Desktop Extension files
+*.mcpb
+.mcpb-ignore
