@@ -5,12 +5,13 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { 
+import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   Tool
 } from '@modelcontextprotocol/sdk/types.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { AuthManager } from './core/auth.js';
 import { CacheManager } from './core/cache.js';
@@ -100,111 +101,32 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
     }
   );
   
-  // Define available tools with proper MCP format
+  // Generate tool definitions from Zod schemas
   const toolDefinitions: Tool[] = [
     {
       name: 'browse_subreddit',
       description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising). Returns post list with content, scores, and metadata.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          subreddit: { type: 'string', description: 'Subreddit name without r/ prefix. Use specific subreddit (e.g., "technology"), "all" for Reddit-wide posts, or "popular" for trending across default subreddits' },
-          sort: {
-            type: 'string',
-            enum: ['hot', 'new', 'top', 'rising', 'controversial'],
-            description: 'How to sort posts: "hot" (trending), "new" (recent), "top" (highest score), "rising" (gaining traction). Default: hot'
-          },
-          time: {
-            type: 'string',
-            enum: ['hour', 'day', 'week', 'month', 'year', 'all'],
-            description: 'Time range for "top" sort only: "hour", "day", "week", "month", "year", "all"'
-          },
-          limit: { type: 'number', description: 'Default 25, range (1-100). Change ONLY IF user specifies.' },
-          include_nsfw: { type: 'boolean', description: 'Include adult content posts (default: false)' },
-          include_subreddit_info: { type: 'boolean', description: 'Include subreddit metadata like subscriber count and description (default: false)' }
-        },
-        required: ['subreddit']
-      }
+      inputSchema: zodToJsonSchema(browseSubredditSchema) as any
     },
     {
       name: 'search_reddit',
       description: 'Search for posts across Reddit or specific subreddits. Returns matching posts with content and metadata.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search terms (e.g., "machine learning", "climate change")' },
-          subreddits: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'List of subreddits to search in. Leave empty to search all of Reddit (e.g., ["science", "technology"])'
-          },
-          sort: {
-            type: 'string',
-            enum: ['relevance', 'hot', 'top', 'new', 'comments'],
-            description: 'Result ordering: "relevance" (best match), "hot", "top", "new", "comments" (most discussed)'
-          },
-          time: {
-            type: 'string',
-            enum: ['hour', 'day', 'week', 'month', 'year', 'all'],
-            description: 'Time range filter: "hour", "day", "week", "month", "year", "all"'
-          },
-          limit: { type: 'number', description: 'Default 25, range (1-100). Override ONLY IF user requests.' },
-          author: { type: 'string', description: 'Filter by specific username (e.g., "spez")' },
-          flair: { type: 'string', description: 'Filter by post flair/tag (e.g., "Discussion", "News")' }
-        },
-        required: ['query']
-      }
+      inputSchema: zodToJsonSchema(searchRedditSchema) as any
     },
     {
       name: 'get_post_details',
       description: 'Fetch a Reddit post with its comments. Requires EITHER url OR post_id. IMPORTANT: When using post_id alone, an extra API call is made to fetch the subreddit first (2 calls total). For better efficiency, always provide the subreddit parameter when known (1 call total).',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          post_id: { type: 'string', description: 'Reddit post ID (e.g., "abc123"). Can be used alone or with subreddit for better performance' },
-          subreddit: { type: 'string', description: 'Optional subreddit name when using post_id. Providing it avoids an extra API call (e.g., "science")' },
-          url: { type: 'string', description: 'Full Reddit post URL (e.g., "https://reddit.com/r/science/comments/abc123/...")' },
-          comment_limit: { type: 'number', description: 'Default 20, range (1-500). Change ONLY IF user asks.' },
-          comment_sort: {
-            type: 'string',
-            enum: ['best', 'top', 'new', 'controversial', 'qa'],
-            description: 'Comment ordering: "best" (algorithm-ranked), "top" (highest score), "new", "controversial", "qa" (Q&A style). Default: best'
-          },
-          comment_depth: { type: 'number', description: 'Default 3, range (1-10). Override ONLY IF user specifies.' },
-          extract_links: { type: 'boolean', description: 'Extract all URLs mentioned in post and comments (default: false)' },
-          max_top_comments: { type: 'number', description: 'Default 5, range (1-20). Change ONLY IF user requests.' }
-        }
-      }
+      inputSchema: zodToJsonSchema(getPostDetailsSchema) as any
     },
     {
       name: 'user_analysis',
       description: 'Analyze a Reddit user\'s posting history, karma, and activity patterns. Returns posts, comments, and statistics.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          username: { type: 'string', description: 'Reddit username without u/ prefix (e.g., "spez", not "u/spez")' },
-          posts_limit: { type: 'number', description: 'Default 10, range (0-100). Change ONLY IF user specifies.' },
-          comments_limit: { type: 'number', description: 'Default 10, range (0-100). Override ONLY IF user asks.' },
-          time_range: {
-            type: 'string',
-            enum: ['day', 'week', 'month', 'year', 'all'],
-            description: 'Period to analyze: "day", "week", "month", "year", "all". Note: "all" returns newest content, others return top-scored content from that period'
-          },
-          top_subreddits_limit: { type: 'number', description: 'Default 10, range (1-50). Change ONLY IF user requests.' }
-        },
-        required: ['username']
-      }
+      inputSchema: zodToJsonSchema(userAnalysisSchema) as any
     },
     {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          term: { type: 'string', description: 'Reddit term to explain (e.g., "karma", "cake day", "AMA", "ELI5")' }
-        },
-        required: ['term']
-      }
+      inputSchema: zodToJsonSchema(redditExplainSchema) as any
     }
   ];
   
