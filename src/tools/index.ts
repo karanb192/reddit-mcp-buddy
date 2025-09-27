@@ -12,7 +12,7 @@ export const browseSubredditSchema = z.object({
   subreddit: z.string().describe('Subreddit name without r/ prefix. Use specific subreddit (e.g., "technology"), "all" for Reddit-wide posts, or "popular" for trending across default subreddits'),
   sort: z.enum(['hot', 'new', 'top', 'rising', 'controversial']).optional().default('hot'),
   time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional(),
-  limit: z.number().min(1).max(100).optional().default(25),
+  limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Change ONLY IF user specifies.'),
   include_nsfw: z.boolean().optional().default(false),
   include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description'),
 });
@@ -22,7 +22,7 @@ export const searchRedditSchema = z.object({
   subreddits: z.array(z.string()).optional().describe('Subreddits to search in (leave empty for all)'),
   sort: z.enum(['relevance', 'hot', 'top', 'new', 'comments']).optional().default('relevance'),
   time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional().default('all'),
-  limit: z.number().min(1).max(100).optional().default(25),
+  limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Override ONLY IF user requests.'),
   author: z.string().optional(),
   flair: z.string().optional(),
 });
@@ -31,19 +31,19 @@ export const getPostDetailsSchema = z.object({
   post_id: z.string().optional().describe('Reddit post ID (e.g., "1abc2d3")'),
   subreddit: z.string().optional().describe('Subreddit name (optional with post_id, but more efficient if provided)'),
   url: z.string().optional().describe('Full Reddit URL (alternative to post_id)'),
-  comment_limit: z.number().min(1).max(500).optional().default(20),
+  comment_limit: z.number().min(1).max(500).optional().default(20).describe('Default 20, range (1-500). Change ONLY IF user asks.'),
   comment_sort: z.enum(['best', 'top', 'new', 'controversial', 'qa']).optional().default('best'),
-  comment_depth: z.number().min(1).max(10).optional().default(3),
+  comment_depth: z.number().min(1).max(10).optional().default(3).describe('Default 3, range (1-10). Override ONLY IF user specifies.'),
   extract_links: z.boolean().optional().default(false),
-  max_top_comments: z.number().min(1).max(20).optional().default(5).describe('Maximum top comments to show'),
+  max_top_comments: z.number().min(1).max(20).optional().default(5).describe('Default 5, range (1-20). Change ONLY IF user requests.'),
 });
 
 export const userAnalysisSchema = z.object({
   username: z.string().describe('Reddit username'),
-  posts_limit: z.number().min(0).max(100).optional().default(10).describe('Number of recent posts to include (0-100, default: 10)'),
-  comments_limit: z.number().min(0).max(100).optional().default(10).describe('Number of recent comments to include (0-100, default: 10)'),
+  posts_limit: z.number().min(0).max(100).optional().default(10).describe('Default 10, range (0-100). Change ONLY IF user specifies.'),
+  comments_limit: z.number().min(0).max(100).optional().default(10).describe('Default 10, range (0-100). Override ONLY IF user asks.'),
   time_range: z.enum(['day', 'week', 'month', 'year', 'all']).optional().default('month').describe('Time range for posts/comments (default: month). Note: When set to values other than "all", posts are sorted by top scores within that period. When set to "all", posts are sorted by newest'),
-  top_subreddits_limit: z.number().min(1).max(50).optional().default(10).describe('Number of top subreddits to return (1-50, default: 10)'),
+  top_subreddits_limit: z.number().min(1).max(50).optional().default(10).describe('Default 10, range (1-50). Change ONLY IF user requests.'),
 });
 
 

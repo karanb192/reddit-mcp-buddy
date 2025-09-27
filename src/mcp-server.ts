@@ -119,7 +119,7 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
             enum: ['hour', 'day', 'week', 'month', 'year', 'all'],
             description: 'Time range for "top" sort only: "hour", "day", "week", "month", "year", "all"'
           },
-          limit: { type: 'number', description: 'Number of posts to return (1-100, default: 25)' },
+          limit: { type: 'number', description: 'Default 25, range (1-100). Change ONLY IF user specifies.' },
           include_nsfw: { type: 'boolean', description: 'Include adult content posts (default: false)' },
           include_subreddit_info: { type: 'boolean', description: 'Include subreddit metadata like subscriber count and description (default: false)' }
         },
@@ -148,7 +148,7 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
             enum: ['hour', 'day', 'week', 'month', 'year', 'all'],
             description: 'Time range filter: "hour", "day", "week", "month", "year", "all"'
           },
-          limit: { type: 'number', description: 'Number of results (1-100, default: 25)' },
+          limit: { type: 'number', description: 'Default 25, range (1-100). Override ONLY IF user requests.' },
           author: { type: 'string', description: 'Filter by specific username (e.g., "spez")' },
           flair: { type: 'string', description: 'Filter by post flair/tag (e.g., "Discussion", "News")' }
         },
@@ -164,15 +164,15 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
           post_id: { type: 'string', description: 'Reddit post ID (e.g., "abc123"). Can be used alone or with subreddit for better performance' },
           subreddit: { type: 'string', description: 'Optional subreddit name when using post_id. Providing it avoids an extra API call (e.g., "science")' },
           url: { type: 'string', description: 'Full Reddit post URL (e.g., "https://reddit.com/r/science/comments/abc123/...")' },
-          comment_limit: { type: 'number', description: 'Maximum comments to fetch (1-500, default: 20)' },
+          comment_limit: { type: 'number', description: 'Default 20, range (1-500). Change ONLY IF user asks.' },
           comment_sort: {
             type: 'string',
             enum: ['best', 'top', 'new', 'controversial', 'qa'],
             description: 'Comment ordering: "best" (algorithm-ranked), "top" (highest score), "new", "controversial", "qa" (Q&A style). Default: best'
           },
-          comment_depth: { type: 'number', description: 'Levels of nested replies to include (1-10, default: 3)' },
+          comment_depth: { type: 'number', description: 'Default 3, range (1-10). Override ONLY IF user specifies.' },
           extract_links: { type: 'boolean', description: 'Extract all URLs mentioned in post and comments (default: false)' },
-          max_top_comments: { type: 'number', description: 'Number of top comments to return (1-50, default: 5)' }
+          max_top_comments: { type: 'number', description: 'Default 5, range (1-20). Change ONLY IF user requests.' }
         }
       }
     },
@@ -183,14 +183,14 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
         type: 'object',
         properties: {
           username: { type: 'string', description: 'Reddit username without u/ prefix (e.g., "spez", not "u/spez")' },
-          posts_limit: { type: 'number', description: 'Number of recent posts to include (0-100, default: 10)' },
-          comments_limit: { type: 'number', description: 'Number of recent comments to include (0-100, default: 10)' },
+          posts_limit: { type: 'number', description: 'Default 10, range (0-100). Change ONLY IF user specifies.' },
+          comments_limit: { type: 'number', description: 'Default 10, range (0-100). Override ONLY IF user asks.' },
           time_range: {
             type: 'string',
             enum: ['day', 'week', 'month', 'year', 'all'],
             description: 'Period to analyze: "day", "week", "month", "year", "all". Note: "all" returns newest content, others return top-scored content from that period'
           },
-          top_subreddits_limit: { type: 'number', description: 'Number of most-active subreddits to list (1-50, default: 10)' }
+          top_subreddits_limit: { type: 'number', description: 'Default 10, range (1-50). Change ONLY IF user requests.' }
         },
         required: ['username']
       }
