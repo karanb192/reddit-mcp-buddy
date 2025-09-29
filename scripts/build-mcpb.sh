@@ -3,6 +3,20 @@
 # Build script for creating Claude Desktop Extension (.mcpb file)
 # Creates a clean 5.3MB bundle with manifest.json at root level
 
+# Check if script is being run from repository root
+if [ ! -f "package.json" ] || [ ! -d "src" ] || [ ! -f "manifest.json" ]; then
+    echo "❌ Error: This script must be run from the repository root!"
+    echo ""
+    echo "Please run from the repository root directory:"
+    echo "  ./scripts/build-mcpb.sh"
+    echo ""
+    echo "NOT from:"
+    echo "  cd scripts && ./build-mcpb.sh  ❌"
+    echo ""
+    echo "Current directory: $(pwd)"
+    exit 1
+fi
+
 echo "🔨 Building Reddit MCP Buddy Desktop Extension..."
 
 # Check if dist folder exists, build if not
