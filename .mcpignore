@@ -1,0 +1,27 @@
+# Development files
+local-files/
+*.md
+!README.md
+test*
+CLAUDE.md
+.claude/
+CONTRIBUTING.md
+Dockerfile
+deploy-server.sh
+
+# Git and CI/CD
+.git/
+.github/
+
+# Build files
+*.ts
+tsconfig.json
+.eslintrc.js
+
+# Unnecessary for bundle
+bundle.config.json
+.gitignore
+.mcpignore
+
+# Other mcpb bundles
+*.mcpb

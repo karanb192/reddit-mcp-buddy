@@ -1,0 +1,22 @@
+{
+  "manifest_version": "0.2",
+  "name": "reddit-mcp-buddy",
+  "version": "1.1.6",
+  "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
+  "author": {
+    "name": "Karan Bansal <karanb192@gmail.com>"
+  },
+  "icon": "assets/reddit-icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/index.js"
+      ],
+      "env": {}
+    }
+  },
+  "license": "MIT"
+}
