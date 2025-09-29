@@ -24,6 +24,10 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 - [Available Tools](#available-tools)
 - [Authentication](#authentication-optional)
 - [Installation Options](#installation-options)
+  - [Global Install](#global-install)
+  - [From Source](#from-source)
+  - [Using Docker](#using-docker)
+  - [Claude Desktop Extension](#claude-desktop-extension)
 - [Comparison with Other Tools](#comparison-with-other-tools)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
@@ -239,6 +243,23 @@ npm link
 ```bash
 docker run -it karanb192/reddit-mcp-buddy
 ```
+
+### Claude Desktop Extension
+
+For advanced users who want one-click installation in Claude Desktop, you can build the extension locally:
+
+1. **Build the extension** (requires cloning the repository):
+```bash
+git clone https://github.com/karanb192/reddit-mcp-buddy.git
+cd reddit-mcp-buddy
+./scripts/build-mcpb.sh
+```
+
+2. **Install in Claude Desktop**:
+   - Open the generated `reddit-mcp-buddy.mcpb` file
+   - Claude Desktop will automatically install the extension
+
+**Note**: The Desktop Extension format is currently in preview (September 2025). Most users should use the standard npm installation method shown in [Quick Start](#quick-start-30-seconds).
 
 ## Comparison with Other Tools
 
