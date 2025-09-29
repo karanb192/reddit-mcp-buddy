@@ -7,13 +7,16 @@
 if [ ! -f "package.json" ] || [ ! -d "src" ] || [ ! -f "manifest.json" ]; then
     echo "❌ Error: This script must be run from the repository root!"
     echo ""
-    echo "Please run from the repository root directory:"
+    echo "Current directory: $(pwd)"
+    echo ""
+    echo "Required files not found. Please cd to the repository root and run:"
+    echo "  cd /path/to/reddit-mcp-buddy"
     echo "  ./scripts/build-mcpb.sh"
     echo ""
-    echo "NOT from:"
-    echo "  cd scripts && ./build-mcpb.sh  ❌"
-    echo ""
-    echo "Current directory: $(pwd)"
+    echo "The repository root should contain:"
+    echo "  - package.json"
+    echo "  - manifest.json"
+    echo "  - src/ directory"
     exit 1
 fi
 
