@@ -6,7 +6,7 @@
   "author": {
     "name": "Karan Bansal <karanb192@gmail.com>"
   },
-  "icon": "assets/reddit-icon.png",
+  "icon": "assets/reddit-mcp-buddy-icon.png",
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",
