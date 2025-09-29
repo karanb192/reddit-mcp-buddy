@@ -1,10 +1,18 @@
 {
-  "manifest_version": "0.2",
+  "manifest_version": "0.1",
   "name": "reddit-mcp-buddy",
+  "display_name": "Reddit MCP Buddy",
   "version": "1.1.6",
-  "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
+  "description": "Browse Reddit directly in Claude Desktop. Search posts, analyze users, explore communities - no API keys needed.",
+  "long_description": "Reddit MCP Buddy brings the entire Reddit ecosystem to Claude Desktop with zero configuration required.\n\n**Key Features:**\n• Browse any subreddit with sorting options (hot, new, top, rising)\n• Search Reddit content across all communities\n• Analyze user profiles with karma and post history\n• Get full post details including comments\n• Understand Reddit culture and terminology\n\n**Why Choose Reddit MCP Buddy:**\n• **No API Keys Required** - Works instantly in anonymous mode\n• **Smart Caching** - Fast responses with intelligent caching\n• **Rate Limit Optimized** - Up to 100 requests/minute with authentication\n• **Clean Data** - Only real Reddit data, no fake metrics\n• **Cross-Platform** - Works on Windows, macOS, and Linux\n\n**Perfect for:**\n• Market research and trend analysis\n• Community sentiment monitoring\n• Content discovery and curation\n• User behavior analysis\n• Real-time discussion tracking",
   "author": {
-    "name": "Karan Bansal <karanb192@gmail.com>"
+    "name": "Karan Bansal",
+    "email": "karanb192@gmail.com",
+    "url": "https://github.com/karanb192"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karanb192/reddit-mcp-buddy"
   },
   "icon": "assets/reddit-mcp-buddy-icon.png",
   "server": {
@@ -15,8 +23,76 @@
       "args": [
         "${__dirname}/dist/index.js"
       ],
-      "env": {}
+      "env": {
+        "REDDIT_CLIENT_ID": "${user_config.reddit_client_id}",
+        "REDDIT_CLIENT_SECRET": "${user_config.reddit_client_secret}",
+        "REDDIT_USERNAME": "${user_config.reddit_username}",
+        "REDDIT_PASSWORD": "${user_config.reddit_password}"
+      }
     }
   },
-  "license": "MIT"
+  "tools": [
+    {
+      "name": "browse_subreddit",
+      "description": "Browse posts from any subreddit with sorting options"
+    },
+    {
+      "name": "search_reddit",
+      "description": "Search Reddit for posts, comments, and discussions"
+    },
+    {
+      "name": "get_post_details",
+      "description": "Get full post details including all comments"
+    },
+    {
+      "name": "user_analysis",
+      "description": "Analyze Reddit user profiles, karma, and activity"
+    },
+    {
+      "name": "reddit_explain",
+      "description": "Explain Reddit terminology, culture, and inside jokes"
+    }
+  ],
+  "keywords": [
+    "reddit",
+    "social-media",
+    "api",
+    "search",
+    "analysis",
+    "community",
+    "research",
+    "browsing",
+    "no-auth"
+  ],
+  "license": "MIT",
+  "user_config": {
+    "reddit_client_id": {
+      "type": "string",
+      "title": "Reddit Client ID",
+      "description": "Your Reddit app client ID (optional - increases rate limit to 60 req/min)",
+      "required": false,
+      "sensitive": false
+    },
+    "reddit_client_secret": {
+      "type": "string",
+      "title": "Reddit Client Secret",
+      "description": "Your Reddit app client secret (required with client ID)",
+      "required": false,
+      "sensitive": true
+    },
+    "reddit_username": {
+      "type": "string",
+      "title": "Reddit Username",
+      "description": "Your Reddit username (optional - increases rate limit to 100 req/min)",
+      "required": false,
+      "sensitive": false
+    },
+    "reddit_password": {
+      "type": "string",
+      "title": "Reddit Password",
+      "description": "Your Reddit password (required with username for 100 req/min)",
+      "required": false,
+      "sensitive": true
+    }
+  }
 }
