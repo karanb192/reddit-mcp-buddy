@@ -11,7 +11,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && chmod +x dist/cli.js",
+    "build": "tsc && (chmod +x dist/cli.js 2>/dev/null || true)",
     "start": "node dist/index.js",
     "start:http": "REDDIT_BUDDY_HTTP=true node dist/index.js",
     "test": "vitest",
