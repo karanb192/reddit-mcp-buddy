@@ -7,7 +7,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 [![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dreddit-mcp-buddy&query=%24.servers%5B-1%3A%5D.version&label=MCP%20Registry&color=blue)](https://registry.modelcontextprotocol.io/v0/servers/5677b351-373d-4137-bc58-28f1ba0d105d)
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![npm downloads](https://img.shields.io/npm/dm/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
-[![GitHub stars](https://img.shields.io/github/stars/karanb192/reddit-mcp-buddy.svg)](https://github.com/karanb192/reddit-mcp-buddy/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/karanb192/reddit-mcp-buddy.svg?color=yellow)](https://github.com/karanb192/reddit-mcp-buddy/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ## 🎬 See It In Action
