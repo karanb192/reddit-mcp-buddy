@@ -53,3 +53,6 @@ test*
 
 # MCP registry auth tokens
 .mcpregistry_*
+
+# Desktop extension bundles
+*.mcpb
