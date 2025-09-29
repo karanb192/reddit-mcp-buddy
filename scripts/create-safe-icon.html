@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reddit MCP Buddy Icon Generator</title>
+</head>
+<body>
+    <h1>Safe Icon Options for Reddit MCP Buddy</h1>
+
+    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+        <!-- Option 1: Telescope/Browser -->
+        <div>
+            <h3>Option 1: Browse Icon</h3>
+            <canvas id="canvas1" width="256" height="256"></canvas>
+        </div>
+
+        <!-- Option 2: R with Arrow -->
+        <div>
+            <h3>Option 2: R with Arrows</h3>
+            <canvas id="canvas2" width="256" height="256"></canvas>
+        </div>
+
+        <!-- Option 3: Robot Buddy -->
+        <div>
+            <h3>Option 3: MCP Robot</h3>
+            <canvas id="canvas3" width="256" height="256"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Option 1: Browse/Telescope icon
+        const ctx1 = document.getElementById('canvas1').getContext('2d');
+        // Background
+        ctx1.fillStyle = '#FF4500'; // Reddit orange
+        ctx1.fillRect(0, 0, 256, 256);
+        // White circle
+        ctx1.fillStyle = 'white';
+        ctx1.beginPath();
+        ctx1.arc(128, 128, 80, 0, 2 * Math.PI);
+        ctx1.fill();
+        // Magnifying glass
+        ctx1.strokeStyle = '#FF4500';
+        ctx1.lineWidth = 8;
+        ctx1.beginPath();
+        ctx1.arc(110, 110, 35, 0, 2 * Math.PI);
+        ctx1.stroke();
+        ctx1.beginPath();
+        ctx1.moveTo(135, 135);
+        ctx1.lineTo(160, 160);
+        ctx1.stroke();
+
+        // Option 2: R with arrows
+        const ctx2 = document.getElementById('canvas2').getContext('2d');
+        // Background gradient
+        const gradient = ctx2.createLinearGradient(0, 0, 256, 256);
+        gradient.addColorStop(0, '#FF5700');
+        gradient.addColorStop(1, '#FF4500');
+        ctx2.fillStyle = gradient;
+        ctx2.fillRect(0, 0, 256, 256);
+        // White R
+        ctx2.fillStyle = 'white';
+        ctx2.font = 'bold 120px Arial';
+        ctx2.textAlign = 'center';
+        ctx2.textBaseline = 'middle';
+        ctx2.fillText('R', 100, 130);
+        // Up arrow
+        ctx2.beginPath();
+        ctx2.moveTo(180, 80);
+        ctx2.lineTo(170, 95);
+        ctx2.lineTo(190, 95);
+        ctx2.closePath();
+        ctx2.fill();
+        // Down arrow
+        ctx2.beginPath();
+        ctx2.moveTo(180, 180);
+        ctx2.lineTo(170, 165);
+        ctx2.lineTo(190, 165);
+        ctx2.closePath();
+        ctx2.fill();
+
+        // Option 3: Simple robot
+        const ctx3 = document.getElementById('canvas3').getContext('2d');
+        // Background
+        ctx3.fillStyle = '#1a1a1b'; // Dark theme
+        ctx3.fillRect(0, 0, 256, 256);
+        // Robot head
+        ctx3.fillStyle = '#FF4500';
+        ctx3.fillRect(80, 60, 96, 80);
+        // Eyes
+        ctx3.fillStyle = 'white';
+        ctx3.fillRect(95, 80, 20, 20);
+        ctx3.fillRect(141, 80, 20, 20);
+        // Antenna
+        ctx3.strokeStyle = '#FF4500';
+        ctx3.lineWidth = 4;
+        ctx3.beginPath();
+        ctx3.moveTo(128, 60);
+        ctx3.lineTo(128, 40);
+        ctx3.stroke();
+        ctx3.beginPath();
+        ctx3.arc(128, 35, 5, 0, 2 * Math.PI);
+        ctx3.fill();
+        // Body
+        ctx3.fillStyle = '#FF4500';
+        ctx3.fillRect(90, 150, 76, 60);
+        // MCP text
+        ctx3.fillStyle = 'white';
+        ctx3.font = '20px monospace';
+        ctx3.textAlign = 'center';
+        ctx3.fillText('MCP', 128, 180);
+
+        // Download function
+        function downloadCanvas(canvasId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+    </script>
+
+    <div style="margin-top: 20px;">
+        <button onclick="downloadCanvas('canvas1', 'reddit-mcp-browse.png')">Download Option 1</button>
+        <button onclick="downloadCanvas('canvas2', 'reddit-mcp-arrows.png')">Download Option 2</button>
+        <button onclick="downloadCanvas('canvas3', 'reddit-mcp-robot.png')">Download Option 3</button>
+    </div>
+</body>
+</html>
