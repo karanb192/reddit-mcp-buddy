@@ -8,8 +8,22 @@ echo "🔨 Building Reddit MCP Buddy Desktop Extension..."
 # Check if dist folder exists, build if not
 if [ ! -d "dist" ]; then
     echo "📚 Building TypeScript (dist folder not found)..."
-    npm install
+    echo "📦 Installing all dependencies (including TypeScript)..."
+    npm install  # This installs ALL dependencies including dev dependencies
+
+    echo "🔨 Compiling TypeScript..."
     npm run build
+
+    # Verify build succeeded
+    if [ ! -d "dist" ]; then
+        echo "❌ Error: Build failed - dist folder still not found after npm run build"
+        echo "Try running these commands manually:"
+        echo "  npm install"
+        echo "  npm run build"
+        echo "And check for TypeScript compilation errors"
+        exit 1
+    fi
+    echo "✅ TypeScript compilation successful"
 fi
 
 # Clean up any previous builds
