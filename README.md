@@ -246,18 +246,22 @@ docker run -it karanb192/reddit-mcp-buddy
 
 ### Claude Desktop Extension
 
-For advanced users who want one-click installation in Claude Desktop, you can build the extension locally:
+For one-click installation in Claude Desktop, download the pre-built extension:
 
-1. **Build the extension** (requires cloning the repository):
+**📦 [Download reddit-mcp-buddy.mcpb](https://github.com/karanb192/reddit-mcp-buddy/releases/latest/download/reddit-mcp-buddy.mcpb)**
+
+Then:
+1. **Open the downloaded file** - Claude Desktop will automatically install the extension
+2. **Restart Claude Desktop** - The Reddit tools will be available
+
+#### Build from Source (Optional)
+
+If you prefer to build the extension yourself:
 ```bash
 git clone https://github.com/karanb192/reddit-mcp-buddy.git
 cd reddit-mcp-buddy
 ./scripts/build-mcpb.sh
 ```
-
-2. **Install in Claude Desktop**:
-   - Open the generated `reddit-mcp-buddy.mcpb` file
-   - Claude Desktop will automatically install the extension
 
 **Note**: The Desktop Extension format is currently in preview (September 2025). Most users should use the standard npm installation method shown in [Quick Start](#quick-start-30-seconds).
 
