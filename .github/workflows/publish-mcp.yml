@@ -13,6 +13,9 @@ jobs:
       id-token: write  # Required for GitHub OIDC authentication
       contents: write  # Required to create GitHub Releases
 
+    env:
+      MCP_PUBLISHER_VERSION: "1.2.0"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -69,8 +72,8 @@ jobs:
 
       - name: Install MCP Publisher
         run: |
-          echo "📥 Downloading MCP Publisher v1.2.0..."
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.2.0/mcp-publisher_1.2.0_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" -o mcp-publisher.tar.gz
+          echo "📥 Downloading MCP Publisher v${{ env.MCP_PUBLISHER_VERSION }}..."
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v${{ env.MCP_PUBLISHER_VERSION }}/mcp-publisher_${{ env.MCP_PUBLISHER_VERSION }}_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" -o mcp-publisher.tar.gz
 
           echo "📦 Extracting..."
           tar xzf mcp-publisher.tar.gz
