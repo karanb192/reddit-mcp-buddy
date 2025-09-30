@@ -119,7 +119,7 @@ jobs:
             echo "✅ Server found in registry, checking version..."
 
             # Extract the latest version from the response
-            LATEST_VERSION=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); servers = data.get('servers', []); [print(server.get('version', 'unknown')) for server in servers if server.get('_meta', {}).get('io.modelcontextprotocol.registry/official', {}).get('is_latest')]" | head -1)
+            LATEST_VERSION=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); servers = data.get('servers', []); [print(server.get('version', 'unknown')) for server in servers if server.get('_meta', {}).get('io.modelcontextprotocol.registry/official', {}).get('isLatest')]" | head -1)
 
             echo "🔍 Latest version in registry: $LATEST_VERSION"
 
