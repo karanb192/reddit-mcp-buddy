@@ -250,9 +250,7 @@ For one-click installation in Claude Desktop, download the pre-built extension:
 
 **📦 [Download reddit-mcp-buddy.mcpb](https://github.com/karanb192/reddit-mcp-buddy/releases/latest/download/reddit-mcp-buddy.mcpb)**
 
-Then:
-1. **Open the downloaded file** - Claude Desktop will automatically install the extension
-2. **Restart Claude Desktop** - The Reddit tools will be available
+**Installation:** Simply open the downloaded `.mcpb` file - Claude Desktop will automatically install the extension and the Reddit tools will be immediately available.
 
 #### Build from Source (Optional)
 
