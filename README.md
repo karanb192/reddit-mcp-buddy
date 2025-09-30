@@ -45,7 +45,13 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## Quick Start (30 seconds)
 
-### For Claude Desktop
+### For Claude Desktop - Desktop Extension (Easiest!)
+
+1. **Download**: [reddit-mcp-buddy.mcpb](https://github.com/karanb192/reddit-mcp-buddy/releases/latest/download/reddit-mcp-buddy.mcpb)
+2. **Install**: Open the downloaded file
+3. **Done!** Reddit tools are now available in Claude
+
+### For Claude Desktop - NPM Method (Alternative)
 
 Add this to your `claude_desktop_config.json`:
 
@@ -60,7 +66,9 @@ Add this to your `claude_desktop_config.json`:
 }
 ```
 
-That's it! Reddit MCP Buddy is now available in Claude.
+### For Other MCP Clients
+
+Use the NPM method: `npx reddit-mcp-buddy`
 
 ## What can it do?
 
