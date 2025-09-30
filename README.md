@@ -1,4 +1,4 @@
-# <img src="assets/reddit-mcp-buddy-icon.png" width="48" style="vertical-align: middle; border: none;"/> Reddit MCP Buddy
+# 🤖 Reddit MCP Buddy
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
