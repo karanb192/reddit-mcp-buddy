@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # Required for GitHub OIDC authentication
-      contents: read
+      contents: write  # Required to create GitHub Releases
 
     steps:
       - name: Checkout repository
@@ -36,6 +36,35 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Build Desktop Extension (.mcpb)
+        run: |
+          chmod +x scripts/build-mcpb.sh
+          ./scripts/build-mcpb.sh
+
+      - name: Verify .mcpb file was created
+        run: |
+          if [ ! -f "reddit-mcp-buddy.mcpb" ]; then
+            echo "Error: reddit-mcp-buddy.mcpb not found!"
+            exit 1
+          fi
+          ls -lh reddit-mcp-buddy.mcpb
+
+      - name: Extract version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            reddit-mcp-buddy.mcpb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install MCP Publisher
         run: |
