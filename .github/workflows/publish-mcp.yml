@@ -11,7 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # Required for GitHub OIDC authentication
-      contents: read
+      contents: write  # Required to create GitHub Releases
+
+    env:
+      MCP_PUBLISHER_VERSION: "1.2.0"
 
     steps:
       - name: Checkout repository
@@ -32,25 +35,71 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Build Desktop Extension (.mcpb)
+        run: |
+          chmod +x scripts/build-mcpb.sh
+          ./scripts/build-mcpb.sh
+
+      - name: Verify .mcpb file was created
+        run: |
+          if [ ! -f "reddit-mcp-buddy.mcpb" ]; then
+            echo "Error: reddit-mcp-buddy.mcpb not found!"
+            exit 1
+          fi
+          ls -lh reddit-mcp-buddy.mcpb
+          echo "✅ All build artifacts ready"
+
+      - name: Extract version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
       - name: Publish to npm
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            reddit-mcp-buddy.mcpb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install MCP Publisher
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          echo "📥 Downloading MCP Publisher v${{ env.MCP_PUBLISHER_VERSION }}..."
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v${{ env.MCP_PUBLISHER_VERSION }}/mcp-publisher_${{ env.MCP_PUBLISHER_VERSION }}_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" -o mcp-publisher.tar.gz
+
+          echo "📦 Extracting..."
+          tar xzf mcp-publisher.tar.gz
+
+          echo "✅ Verifying installation..."
+          if [ ! -f "./mcp-publisher" ]; then
+            echo "::error::MCP Publisher binary not found after extraction"
+            exit 1
+          fi
+          chmod +x ./mcp-publisher
+          ./mcp-publisher --version || echo "Version check failed, continuing..."
 
       - name: Login to MCP Registry
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
         run: |
+          echo "📤 Publishing to MCP Registry..."
           ./mcp-publisher publish
-          if [ $? -ne 0 ]; then
-            echo "::error::MCP Publisher failed to publish the server"
+          EXIT_CODE=$?
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::MCP Publisher failed to publish the server (exit code: $EXIT_CODE)"
             exit 1
           fi
+
           echo "✅ Successfully published to MCP registry!"
 
       - name: Verify Registry Publishing
