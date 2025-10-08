@@ -2,7 +2,7 @@
   "manifest_version": "0.1",
   "name": "reddit-mcp-buddy",
   "display_name": "Reddit MCP Buddy",
-  "version": "1.1.6",
+  "version": "1.1.10",
   "description": "Browse Reddit directly in Claude Desktop. Search posts, analyze users, explore communities - no API keys needed.",
   "long_description": "Reddit MCP Buddy brings the entire Reddit ecosystem to Claude Desktop with zero configuration required.\n\n**Key Features:**\n• Browse any subreddit with sorting options (hot, new, top, rising)\n• Search Reddit content across all communities\n• Analyze user profiles with karma and post history\n• Get full post details including comments\n• Understand Reddit culture and terminology\n\n**Why Choose Reddit MCP Buddy:**\n• **No API Keys Required** - Works instantly in anonymous mode\n• **Smart Caching** - Fast responses with intelligent caching\n• **Rate Limit Optimized** - Up to 100 requests/minute with authentication\n• **Clean Data** - Only real Reddit data, no fake metrics\n• **Cross-Platform** - Works on Windows, macOS, and Linux\n\n**Perfect for:**\n• Market research and trend analysis\n• Community sentiment monitoring\n• Content discovery and curation\n• User behavior analysis\n• Real-time discussion tracking",
   "author": {

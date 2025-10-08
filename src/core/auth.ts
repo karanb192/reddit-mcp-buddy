@@ -60,11 +60,11 @@ export class AuthManager {
    * Load configuration from environment variables
    */
   private loadFromEnv(): AuthConfig | null {
-    const clientId = process.env.REDDIT_CLIENT_ID;
-    const clientSecret = process.env.REDDIT_CLIENT_SECRET;
-    const username = process.env.REDDIT_USERNAME;
-    const password = process.env.REDDIT_PASSWORD;
-    const userAgent = process.env.REDDIT_USER_AGENT;
+    const clientId = this.cleanEnvVar(process.env.REDDIT_CLIENT_ID);
+    const clientSecret = this.cleanEnvVar(process.env.REDDIT_CLIENT_SECRET);
+    const username = this.cleanEnvVar(process.env.REDDIT_USERNAME);
+    const password = this.cleanEnvVar(process.env.REDDIT_PASSWORD);
+    const userAgent = this.cleanEnvVar(process.env.REDDIT_USER_AGENT);
 
     // Need at least client ID and secret for script apps
     if (!clientId || !clientSecret) {
@@ -78,6 +78,27 @@ export class AuthManager {
       password,
       userAgent: userAgent || 'RedditBuddy/1.0 (by /u/karanb192)'
     };
+  }
+
+  /**
+   * Clean environment variable value
+   * Handles empty strings, undefined, and unresolved template strings
+   */
+  private cleanEnvVar(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+
+    const trimmed = value.trim();
+
+    // Treat empty strings as undefined
+    if (trimmed === '') return undefined;
+
+    // Treat unresolved template strings as undefined
+    // (happens when Claude Desktop doesn't have the config value set)
+    if (trimmed.startsWith('${') && trimmed.endsWith('}')) {
+      return undefined;
+    }
+
+    return trimmed;
   }
 
   /**
