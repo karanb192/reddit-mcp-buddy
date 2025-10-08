@@ -74,8 +74,6 @@ Run this command to add the MCP server (user scope):
 claude mcp add --transport stdio reddit-mcp-buddy -s user -- npx -y reddit-mcp-buddy
 ```
 
-**Source:** [Claude Code MCP Documentation](https://docs.claude.com/en/docs/claude-code/mcp)
-
 ### For Other MCP Clients
 
 Use the NPM method: `npx -y reddit-mcp-buddy`
