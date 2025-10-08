@@ -60,7 +60,7 @@ Add this to your `claude_desktop_config.json`:
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["reddit-mcp-buddy"]
+      "args": ["-y", "reddit-mcp-buddy"]
     }
   }
 }
@@ -150,7 +150,7 @@ Want more requests? Add Reddit credentials to your Claude Desktop config:
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["reddit-mcp-buddy"],
+      "args": ["-y", "reddit-mcp-buddy"],
       "env": {
         "REDDIT_CLIENT_ID": "your_client_id",
         "REDDIT_CLIENT_SECRET": "your_client_secret",
