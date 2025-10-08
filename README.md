@@ -60,15 +60,23 @@ Add this to your `claude_desktop_config.json`:
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["reddit-mcp-buddy"]
+      "args": ["-y", "reddit-mcp-buddy"]
     }
   }
 }
 ```
 
+### For Claude Code
+
+Run this command to add the MCP server (user scope):
+
+```bash
+claude mcp add --transport stdio reddit-mcp-buddy -s user -- npx -y reddit-mcp-buddy
+```
+
 ### For Other MCP Clients
 
-Use the NPM method: `npx reddit-mcp-buddy`
+Use the NPM method: `npx -y reddit-mcp-buddy`
 
 ## What can it do?
 
@@ -150,7 +158,7 @@ Want more requests? Add Reddit credentials to your Claude Desktop config:
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["reddit-mcp-buddy"],
+      "args": ["-y", "reddit-mcp-buddy"],
       "env": {
         "REDDIT_CLIENT_ID": "your_client_id",
         "REDDIT_CLIENT_SECRET": "your_client_secret",
@@ -214,7 +222,7 @@ The rate limit tester will:
 
 For local development and testing, you can set up authentication interactively:
 ```bash
-npx reddit-mcp-buddy --auth
+npx -y reddit-mcp-buddy --auth
 ```
 
 This will prompt you for Reddit app credentials and save them locally. **Note: This does NOT work with Claude Desktop** - use environment variables in your Claude config instead.
@@ -224,10 +232,10 @@ This will prompt you for Reddit app credentials and save them locally. **Note: T
 To test the server directly in your terminal:
 ```bash
 # Run in HTTP mode on port 3000
-npx reddit-mcp-buddy --http
+npx -y reddit-mcp-buddy --http
 
 # Or with custom port
-REDDIT_BUDDY_PORT=8080 npx reddit-mcp-buddy --http
+REDDIT_BUDDY_PORT=8080 npx -y reddit-mcp-buddy --http
 ```
 
 **Note:** The server runs in stdio mode by default (for Claude Desktop). Use `--http` flag for testing with Postman MCP or direct API calls.
