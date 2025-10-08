@@ -66,6 +66,32 @@ Add this to your `claude_desktop_config.json`:
 }
 ```
 
+### For Claude Code
+
+Add this to your MCP settings file (`.claude/mcp_settings.json` in your project or global config):
+
+```json
+{
+  "mcpServers": {
+    "reddit": {
+      "command": "npx",
+      "args": ["-y", "reddit-mcp-buddy"]
+    }
+  }
+}
+```
+
+**Or use the Claude Code UI:**
+1. Open Command Palette (`Cmd/Ctrl + Shift + P`)
+2. Search for "MCP: Edit Settings"
+3. Add the server configuration above
+4. Restart Claude Code
+
+**Quick test:** Try asking Claude Code:
+- "What's trending on r/programming today?"
+- "Search Reddit for discussions about [your topic]"
+- "Analyze the top post on r/technology"
+
 ### For Other MCP Clients
 
 Use the NPM method: `npx -y reddit-mcp-buddy`
