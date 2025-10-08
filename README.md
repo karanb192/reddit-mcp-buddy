@@ -68,23 +68,10 @@ Add this to your `claude_desktop_config.json`:
 
 ### For Claude Code
 
-Run this command to add the MCP server:
+Run this command to add the MCP server (user scope):
 
 ```bash
 claude mcp add --transport stdio reddit-mcp-buddy -s user -- npx -y reddit-mcp-buddy
-```
-
-**Or manually add to** `.mcp.json` in your project root:
-
-```json
-{
-  "mcpServers": {
-    "reddit": {
-      "command": "npx",
-      "args": ["-y", "reddit-mcp-buddy"]
-    }
-  }
-}
 ```
 
 **Source:** [Claude Code MCP Documentation](https://docs.claude.com/en/docs/claude-code/mcp)
