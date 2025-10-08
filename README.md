@@ -68,7 +68,13 @@ Add this to your `claude_desktop_config.json`:
 
 ### For Claude Code
 
-Add this to your MCP settings file (`.claude/mcp_settings.json` in your project or global config):
+Run this command to add the MCP server:
+
+```bash
+claude mcp add --transport stdio reddit-mcp-buddy -s user -- npx -y reddit-mcp-buddy
+```
+
+**Or manually edit** `.claude/mcp_settings.json`:
 
 ```json
 {
@@ -80,12 +86,6 @@ Add this to your MCP settings file (`.claude/mcp_settings.json` in your project 
   }
 }
 ```
-
-**Or use the Claude Code UI:**
-1. Open Command Palette (`Cmd/Ctrl + Shift + P`)
-2. Search for "MCP: Edit Settings"
-3. Add the server configuration above
-4. Restart Claude Code
 
 **Quick test:** Try asking Claude Code:
 - "What's trending on r/programming today?"
