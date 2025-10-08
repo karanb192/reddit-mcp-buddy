@@ -74,7 +74,7 @@ Run this command to add the MCP server:
 claude mcp add --transport stdio reddit-mcp-buddy -s user -- npx -y reddit-mcp-buddy
 ```
 
-**Or manually edit** `.claude/mcp_settings.json`:
+**Or manually add to** `.mcp.json` in your project root:
 
 ```json
 {
@@ -87,10 +87,7 @@ claude mcp add --transport stdio reddit-mcp-buddy -s user -- npx -y reddit-mcp-b
 }
 ```
 
-**Quick test:** Try asking Claude Code:
-- "What's trending on r/programming today?"
-- "Search Reddit for discussions about [your topic]"
-- "Analyze the top post on r/technology"
+**Source:** [Claude Code MCP Documentation](https://docs.claude.com/en/docs/claude-code/mcp)
 
 ### For Other MCP Clients
 
