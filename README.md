@@ -190,6 +190,47 @@ Reddit MCP Buddy supports three authentication levels, each with different rate 
 - Web apps only support app-only mode (60 rpm maximum)
 - For 100 requests/minute, you MUST use a script app with username + password
 
+## Privacy & Data Handling
+
+Reddit MCP Buddy is designed with privacy and transparency in mind. Here's how your data is handled:
+
+### Data Collection
+- **Reddit API Data**: The server fetches public Reddit content (posts, comments, user profiles) through Reddit's official API
+- **No Tracking**: We don't collect, store, or transmit any analytics, telemetry, or usage data
+- **No Third Parties**: All data flows directly between your machine, Reddit's API, and your AI assistant
+
+### Local Storage
+- **Authentication Credentials** (optional):
+  - Stored locally in `~/.reddit-mcp-buddy/auth.json` when using `--auth` CLI setup
+  - Passwords are **never** written to disk - only used in-memory for OAuth token exchange
+  - Environment variables (recommended for Claude Desktop) are never persisted by this server
+- **Cache Data**:
+  - Reddit API responses are temporarily cached in memory to improve performance
+  - Cache size limited to 50MB maximum
+  - All cache data is cleared when the server stops
+  - Can be disabled with `REDDIT_BUDDY_NO_CACHE=true`
+
+### Data Transmission
+- **Reddit API Only**: Your credentials are only sent to Reddit's official OAuth endpoints (`https://oauth.reddit.com` and `https://www.reddit.com`)
+- **No External Services**: No data is sent to any other external services, analytics platforms, or third parties
+- **Local Processing**: All data processing happens locally on your machine
+
+### Security Notes
+- **Read-Only Operations**: All tools are read-only - the server never posts, comments, or modifies any Reddit content
+- **Credential Safety**:
+  - OAuth tokens are stored in memory and refreshed automatically
+  - Client secrets are treated as sensitive and never logged
+  - Use environment variables in Claude Desktop config for maximum security
+- **Open Source**: Full source code is available at https://github.com/karanb192/reddit-mcp-buddy for security auditing
+
+### GDPR & Privacy Compliance
+- **No Personal Data Collection**: We don't collect or process any personal data beyond what's necessary to authenticate with Reddit's API
+- **User Control**: You control all credentials and can delete `~/.reddit-mcp-buddy/auth.json` at any time
+- **Right to Erasure**: Simply delete the auth file or uninstall the server to remove all local data
+
+### Questions or Concerns?
+If you have any privacy questions or concerns, please [open an issue](https://github.com/karanb192/reddit-mcp-buddy/issues) on GitHub.
+
 ## Testing & Development
 
 ### Testing Your Rate Limits
