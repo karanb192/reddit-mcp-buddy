@@ -106,27 +106,32 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
     {
       name: 'browse_subreddit',
       description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising). Returns post list with content, scores, and metadata.',
-      inputSchema: zodToJsonSchema(browseSubredditSchema) as any
+      inputSchema: zodToJsonSchema(browseSubredditSchema) as any,
+      readOnlyHint: true
     },
     {
       name: 'search_reddit',
       description: 'Search for posts across Reddit or specific subreddits. Returns matching posts with content and metadata.',
-      inputSchema: zodToJsonSchema(searchRedditSchema) as any
+      inputSchema: zodToJsonSchema(searchRedditSchema) as any,
+      readOnlyHint: true
     },
     {
       name: 'get_post_details',
       description: 'Fetch a Reddit post with its comments. Requires EITHER url OR post_id. IMPORTANT: When using post_id alone, an extra API call is made to fetch the subreddit first (2 calls total). For better efficiency, always provide the subreddit parameter when known (1 call total).',
-      inputSchema: zodToJsonSchema(getPostDetailsSchema) as any
+      inputSchema: zodToJsonSchema(getPostDetailsSchema) as any,
+      readOnlyHint: true
     },
     {
       name: 'user_analysis',
       description: 'Analyze a Reddit user\'s posting history, karma, and activity patterns. Returns posts, comments, and statistics.',
-      inputSchema: zodToJsonSchema(userAnalysisSchema) as any
+      inputSchema: zodToJsonSchema(userAnalysisSchema) as any,
+      readOnlyHint: true
     },
     {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
-      inputSchema: zodToJsonSchema(redditExplainSchema) as any
+      inputSchema: zodToJsonSchema(redditExplainSchema) as any,
+      readOnlyHint: true
     }
   ];
   
