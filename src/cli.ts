@@ -8,7 +8,7 @@
 import { AuthManager } from './core/auth.js';
 import { SERVER_VERSION } from './mcp-server.js';
 import { spawn } from 'child_process';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join } from 'path';
 import readline from 'readline/promises';
 
@@ -175,10 +175,11 @@ async function startServer() {
   } else {
     // Production mode - run compiled JavaScript
     const serverPath = join(__dirname, 'index.js');
+    const serverUrl = pathToFileURL(serverPath).href;
     
     // Dynamic import to run the server
     try {
-      await import(serverPath);
+      await import(serverUrl);
     } catch (error) {
       console.error('Failed to start server:', error);
       process.exit(1);
