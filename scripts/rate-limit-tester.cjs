@@ -150,6 +150,7 @@ console.log(`${colors.blue}Starting MCP server...${colors.reset}`);
 const server = spawn('npm', ['start'], {
   env: serverEnv,
   stdio: ['ignore', 'pipe', 'pipe'],
+  shell: true, // Required for Windows compatibility
 });
 
 let serverReady = false;
