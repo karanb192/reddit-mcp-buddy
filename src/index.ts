@@ -3,7 +3,10 @@
  * Main entry point
  */
 
+import { setupProxy } from './core/proxy.js';
 import { startStdioServer, startHttpServer } from './mcp-server.js';
+
+setupProxy();
 
 // Determine transport mode from environment
 const isHttpMode = process.env.REDDIT_BUDDY_HTTP === 'true';

@@ -444,6 +444,30 @@ $(npm bin -g)/reddit-mcp-buddy
 | `REDDIT_BUDDY_PORT` | HTTP server port (when HTTP=true) | `3000` |
 | `REDDIT_BUDDY_NO_CACHE` | Disable caching (always fetch fresh) | `false` |
 
+#### Proxy Configuration
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `HTTPS_PROXY` or `https_proxy` | HTTPS proxy server URL | `http://proxy.company.com:8080` |
+| `HTTP_PROXY` or `http_proxy` | HTTP proxy server URL | `http://proxy.company.com:8080` |
+| `NO_PROXY` or `no_proxy` | Comma-separated list of hosts to bypass proxy | `localhost,127.0.0.1` |
+
+**Proxy Support**: Reddit MCP Buddy automatically detects and uses proxy settings from environment variables. This is useful for corporate networks, restricted regions, or when using VPN services.
+
+**Example with authentication**:
+```json
+{
+  "mcpServers": {
+    "reddit": {
+      "command": "npx",
+      "args": ["-y", "reddit-mcp-buddy"],
+      "env": {
+        "HTTPS_PROXY": "http://username:password@proxy.company.com:8080"
+      }
+    }
+  }
+}
+```
+
 ## Technical Details
 
 ### Smart Caching System
