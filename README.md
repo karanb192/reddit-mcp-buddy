@@ -4,6 +4,7 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - no API keys required.
 
+[![Anthropic Directory](https://img.shields.io/badge/Anthropic_Directory-Published-5865F2?style=flat&logo=anthropic&logoColor=white)](https://claude.ai/directory/ant.dir.gh.karanb192.reddit-mcp-buddy)
 [![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dreddit-mcp-buddy&query=%24.servers%5B-1%3A%5D.version&label=MCP%20Registry&color=blue)](https://registry.modelcontextprotocol.io/v0/servers/5677b351-373d-4137-bc58-28f1ba0d105d)
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![npm downloads](https://img.shields.io/npm/dm/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
@@ -513,6 +514,7 @@ We keep things simple:
 - **[Awesome MCP Servers](https://github.com/modelcontextprotocol/awesome-mcp-servers)** - Community-curated list of MCP servers
 
 ### Where to Find This Server
+- **[Anthropic Directory](https://claude.ai/directory/ant.dir.gh.karanb192.reddit-mcp-buddy)** - Official Claude Desktop Extension directory listing
 - **[MCP Registry Direct Link](https://registry.modelcontextprotocol.io/v0/servers/5677b351-373d-4137-bc58-28f1ba0d105d)** - Direct API link to v1.1.1
 - **[MCP Registry Search](https://registry.modelcontextprotocol.io)** - Search for "reddit" to find all versions
 - **[NPM Package](https://www.npmjs.com/package/reddit-mcp-buddy)** - Install via npm/npx
