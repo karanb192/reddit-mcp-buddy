@@ -373,18 +373,24 @@ export class RedditTools {
 
       // Add comments even when there are no posts
       if (comments && comments.data.children.length > 0) {
-        summary.recentComments = comments.data.children.map(child => {
-          const comment = child.data as any;
-          return {
-            id: comment.id,
-            body: comment.body?.substring(0, 200) + (comment.body?.length > 200 ? '...' : ''),
-            score: comment.score,
-            subreddit: comment.subreddit || 'unknown',
-            postTitle: comment.link_title,
-            created: new Date(comment.created_utc * 1000),
-            url: `https://reddit.com${comment.permalink}`,
-          };
-        });
+        // Filter out deleted comments (where data is null) and safely extract data
+        summary.recentComments = comments.data.children
+          .filter(child => child.data !== null && child.data !== undefined)
+          .map(child => {
+            const comment = child.data as any;
+            // Safely handle deleted/removed comments
+            if (!comment.id || !comment.body) return null;
+            return {
+              id: comment.id,
+              body: comment.body.substring(0, 200) + (comment.body.length > 200 ? '...' : ''),
+              score: comment.score || 0,
+              subreddit: comment.subreddit || 'unknown',
+              postTitle: comment.link_title || 'deleted',
+              created: new Date((comment.created_utc || 0) * 1000),
+              url: comment.permalink ? `https://reddit.com${comment.permalink}` : null,
+            };
+          })
+          .filter(c => c !== null); // Remove any null entries from filtering
       }
     }
 

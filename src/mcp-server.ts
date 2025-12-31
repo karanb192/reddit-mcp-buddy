@@ -10,6 +10,7 @@ import {
   ListToolsRequestSchema,
   Tool
 } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
@@ -30,6 +31,60 @@ import {
 export const SERVER_NAME = 'reddit-mcp-buddy';
 export const SERVER_VERSION = '1.1.10';
 
+// MCP Response validation schemas (per MCP spec)
+const ContentBlockSchema = z.object({
+  type: z.enum(['text', 'image']),
+  text: z.string().optional(),
+  data: z.string().optional(), // For base64 encoded images
+  mimeType: z.string().optional(), // For images
+}).refine(
+  (obj) => obj.type === 'text' ? !!obj.text : (!!obj.data && !!obj.mimeType),
+  'text type requires text field, image type requires data and mimeType fields'
+);
+
+const ToolResultResponseSchema = z.object({
+  content: z.array(ContentBlockSchema).min(1, 'content must have at least one block'),
+  isError: z.boolean().optional(),
+}).strict();
+
+// Type for validated MCP responses
+type ToolResultResponse = z.infer<typeof ToolResultResponseSchema>;
+
+/**
+ * Helper function to create a validated MCP response
+ */
+function createValidatedResponse(text: string, isError: boolean = false): ToolResultResponse {
+  const response = {
+    content: [
+      {
+        type: 'text' as const,
+        text,
+      },
+    ],
+    ...(isError && { isError }),
+  };
+
+  // Validate against MCP spec
+  try {
+    return ToolResultResponseSchema.parse(response);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      // If validation fails, return a safe error response
+      console.error('MCP response validation failed:', error.errors);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Internal error: Invalid response format',
+          },
+        ],
+        isError: true,
+      };
+    }
+    throw error;
+  }
+}
+
 /**
  * Create MCP server with proper protocol implementation
  */
@@ -40,7 +95,10 @@ export async function createMCPServer() {
 
   const rateLimit = authManager.getRateLimit();
   const cacheTTL = authManager.getCacheTTL();
-  const disableCache = process.env.REDDIT_BUDDY_NO_CACHE === 'true';
+  // Parse boolean env var (supports various formats: true, 1, yes, on)
+  const disableCache = ['true', '1', 'yes', 'on'].includes(
+    (process.env.REDDIT_BUDDY_NO_CACHE || '').toLowerCase().trim()
+  );
 
   console.error(`🚀 Reddit MCP Buddy Server v${SERVER_VERSION}`);
   console.error(`📊 Mode: ${authManager.getAuthMode()}`);
@@ -177,24 +235,10 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
           throw new Error(`Unknown tool: ${name}`);
       }
       
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      return createValidatedResponse(JSON.stringify(result, null, 2), false);
     } catch (error: any) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return createValidatedResponse(`Error: ${errorMessage}`, true);
     }
     }
   };
@@ -219,17 +263,26 @@ export async function startStdioServer() {
   
   console.error('✅ Reddit MCP Buddy Server running (stdio mode)');
   console.error('💡 Reading from stdin, writing to stdout');
-  
-  // Cleanup on exit
-  process.on('SIGINT', () => {
-    cacheManager.destroy();
-    process.exit(0);
-  });
-  
-  process.on('SIGTERM', () => {
-    cacheManager.destroy();
-    process.exit(0);
-  });
+
+  // Cleanup on exit with proper signal handler management
+  let isExiting = false;
+
+  const cleanup = () => {
+    if (isExiting) return; // Prevent multiple cleanup calls
+    isExiting = true;
+
+    try {
+      // Cleanup in proper order
+      cacheManager.destroy();
+      process.exit(0);
+    } catch (error) {
+      console.error('Error during cleanup:', error);
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
 }
 
 /**
@@ -323,6 +376,54 @@ export async function startHttpServer(port: number = 3000) {
     res.end('Not Found\n');
   });
   
+  // Cleanup on exit with proper signal handler management
+  let isExiting = false;
+
+  const cleanup = () => {
+    if (isExiting) return; // Prevent multiple cleanup calls
+    isExiting = true;
+
+    try {
+      // Close HTTP server first (proper cleanup order)
+      httpServer.close(() => {
+        // Then destroy cache
+        cacheManager.destroy();
+        process.exit(0);
+      });
+
+      // Timeout: if close doesn't complete in 10 seconds, force exit
+      const forceExitTimeout = setTimeout(() => {
+        console.error('⚠️ Server close timeout, forcing exit');
+        cacheManager.destroy();
+        process.exit(1);
+      }, 10000);
+
+      // Clear timeout if close completes
+      httpServer.on('close', () => clearTimeout(forceExitTimeout));
+    } catch (error) {
+      console.error('Error during cleanup:', error);
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+
+  // Handle server errors
+  httpServer.on('error', (error: any) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`❌ Port ${port} is already in use`);
+      console.error(`Try a different port: REDDIT_BUDDY_PORT=${port + 1} npm start`);
+      console.error(`Or kill the process using port ${port}: lsof -ti:${port} | xargs kill -9`);
+    } else if (error.code === 'EACCES') {
+      console.error(`❌ Permission denied. Port ${port} requires elevated privileges`);
+      console.error(`Try a higher port number (>1024): REDDIT_BUDDY_PORT=3001 npm start`);
+    } else {
+      console.error(`❌ Server error: ${error.message}`);
+    }
+    process.exit(1);
+  });
+
   // Start listening
   httpServer.listen(port, () => {
     console.error(`✅ Reddit MCP Buddy Server running (Streamable HTTP)`);
@@ -331,14 +432,4 @@ export async function startHttpServer(port: number = 3000) {
     console.error(`🔌 Connect with Postman MCP client`);
     console.error('💡 Tip: Run "reddit-mcp-buddy --auth" for 10x more requests\n');
   });
-  
-  // Cleanup on exit
-  const cleanup = () => {
-    cacheManager.destroy();
-    httpServer.close();
-    process.exit(0);
-  };
-  
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
 }

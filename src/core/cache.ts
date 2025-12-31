@@ -27,19 +27,19 @@ export class CacheManager {
   constructor(options: CacheOptions = {}) {
     this.maxSize = options.maxSize ?? 50 * 1024 * 1024; // 50MB default
     this.defaultTTL = options.defaultTTL ?? 5 * 60 * 1000; // 5 minutes default
-    
+
     // Adaptive TTL based on content type
     this.ttlByPattern = new Map([
       [/^subreddit:.*:hot$/, 5 * 60 * 1000],    // Hot posts: 5 minutes
-      [/^subreddit:.*:new$/, 2 * 60 * 1000],    // New posts: 2 minutes  
+      [/^subreddit:.*:new$/, 2 * 60 * 1000],    // New posts: 2 minutes
       [/^subreddit:.*:top$/, 30 * 60 * 1000],   // Top posts: 30 minutes
       [/^post:/, 10 * 60 * 1000],               // Individual posts: 10 minutes
       [/^user:/, 15 * 60 * 1000],               // User data: 15 minutes
       [/^search:/, 10 * 60 * 1000],             // Search results: 10 minutes
     ]);
 
-    // Start cleanup interval
-    if (options.cleanupInterval !== 0) {
+    // Only start cleanup if cache is enabled (maxSize > 0)
+    if (this.maxSize > 0 && options.cleanupInterval !== 0) {
       this.startCleanup(options.cleanupInterval ?? 60000); // Every minute
     }
   }
@@ -167,13 +167,39 @@ export class CacheManager {
   }
 
   /**
-   * Generate cache key
+   * Generate cache key with validation
+   * Ensures cache keys are unique, properly formatted, and don't contain invalid characters
    */
   static createKey(...parts: (string | number | boolean | undefined)[]): string {
-    return parts
-      .filter(p => p !== undefined && p !== null)
-      .join(':')
-      .toLowerCase();
+    // Filter out undefined/null values
+    const validParts = parts.filter(p => p !== undefined && p !== null);
+
+    if (validParts.length === 0) {
+      throw new Error('Cache key must have at least one part');
+    }
+
+    // Convert all parts to strings and validate
+    const stringParts = validParts.map((p) => {
+      const str = String(p).toLowerCase().trim();
+      if (str.length === 0) {
+        throw new Error('Cache key parts cannot be empty strings');
+      }
+      // Validate characters (alphanumeric, underscore, hyphen only)
+      if (!/^[a-z0-9_-]+$/.test(str)) {
+        throw new Error(`Invalid cache key part: "${str}" contains invalid characters`);
+      }
+      return str;
+    });
+
+    // Join with colons and validate final key
+    const key = stringParts.join(':');
+
+    // Sanity check: key shouldn't be too long (prevents accidental misuse)
+    if (key.length > 256) {
+      throw new Error(`Cache key too long: ${key.length} > 256 characters`);
+    }
+
+    return key;
   }
 
   /**
@@ -230,9 +256,24 @@ export class CacheManager {
 
   /**
    * Private: Start cleanup timer
+   * Uses unref() to prevent the timer from keeping the process alive
    */
   private startCleanup(interval: number): void {
     this.cleanupTimer = setInterval(() => this.cleanup(), interval);
+    // Mark timer as non-blocking so it doesn't prevent process exit
+    if (this.cleanupTimer && typeof this.cleanupTimer.unref === 'function') {
+      this.cleanupTimer.unref();
+    }
+  }
+
+  /**
+   * Private: Stop cleanup timer
+   */
+  private stopCleanup(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
   }
 
   /**
@@ -266,10 +307,7 @@ export class CacheManager {
    * Cleanup on destroy
    */
   destroy(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
+    this.stopCleanup();
     this.clear();
   }
 }

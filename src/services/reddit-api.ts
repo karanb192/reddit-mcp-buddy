@@ -29,6 +29,10 @@ export class RedditAPI {
   private oauthUrl = 'https://oauth.reddit.com';
   // Request deduplication: Map of in-flight requests keyed by endpoint
   private inFlightRequests: Map<string, Promise<any>> = new Map();
+  // Exponential backoff configuration
+  private readonly MAX_BACKOFF_MS = 30000; // 30 second max backoff
+  private readonly INITIAL_BACKOFF_MS = 100;
+  private readonly BACKOFF_MULTIPLIER = 2;
 
   constructor(options: RedditAPIOptions) {
     this.auth = options.authManager;
@@ -326,6 +330,50 @@ export class RedditAPI {
   }
 
   /**
+   * Private: Calculate exponential backoff with jitter
+   */
+  private calculateBackoff(retriesLeft: number): number {
+    const maxRetries = 2;
+    const retriesUsed = maxRetries - retriesLeft;
+
+    // Exponential backoff: INITIAL * MULTIPLIER^retriesUsed
+    const baseBackoff = this.INITIAL_BACKOFF_MS * Math.pow(this.BACKOFF_MULTIPLIER, retriesUsed);
+
+    // Cap at max backoff
+    const cappedBackoff = Math.min(baseBackoff, this.MAX_BACKOFF_MS);
+
+    // Add jitter (±20% of backoff) to prevent thundering herd
+    const jitter = cappedBackoff * 0.2 * (Math.random() * 2 - 1);
+    const backoff = Math.max(0, cappedBackoff + jitter);
+
+    return Math.round(backoff);
+  }
+
+  /**
+   * Private: Extract retry-after delay from response headers
+   */
+  private getRetryAfterDelay(response: Response): number | null {
+    const retryAfter = response.headers.get('retry-after');
+    if (!retryAfter) return null;
+
+    // Retry-After can be seconds or HTTP date
+    const seconds = parseInt(retryAfter, 10);
+    if (!isNaN(seconds)) {
+      // It's seconds
+      return Math.min(seconds * 1000, this.MAX_BACKOFF_MS);
+    }
+
+    // Try parsing as HTTP date
+    try {
+      const retryDate = new Date(retryAfter);
+      const delay = retryDate.getTime() - Date.now();
+      return Math.max(0, Math.min(delay, this.MAX_BACKOFF_MS));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Private: Make GET request to Reddit API with retry logic and deduplication
    */
   private async get<T>(endpoint: string, retries: number = 2): Promise<T> {
@@ -398,8 +446,10 @@ export class RedditAPI {
       if (!response.ok) {
         // Retry on transient errors (503, 429)
         if ((response.status === 503 || response.status === 429) && retries > 0) {
-          // Service unavailable or too many requests - exponential backoff
-          const backoffMs = (2 - retries) * 1000; // 1s, then 2s
+          // Service unavailable or too many requests - exponential backoff with jitter
+          // Check for Retry-After header first (respects server's backoff request)
+          const retryAfterDelay = this.getRetryAfterDelay(response);
+          const backoffMs = retryAfterDelay ?? this.calculateBackoff(retries);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
           return this.getImpl<T>(endpoint, retries - 1);
         }
@@ -457,7 +507,8 @@ export class RedditAPI {
       if (error.name === 'AbortError') {
         // Retry on timeout if retries available
         if (retries > 0) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          const backoffMs = this.calculateBackoff(retries);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
           return this.getImpl<T>(endpoint, retries - 1);
         }
         throw new Error('Request timeout (10s exceeded) - Reddit may be slow or unreachable. Try again or check if Reddit is blocked on your network.');
@@ -465,7 +516,8 @@ export class RedditAPI {
 
       // Common network errors - retry transient ones
       if (error.code === 'ECONNRESET' && retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        const backoffMs = this.calculateBackoff(retries);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
         return this.getImpl<T>(endpoint, retries - 1);
       }
 
@@ -478,9 +530,10 @@ export class RedditAPI {
       }
 
       if (error.code === 'ETIMEDOUT') {
-        // Retry on connection timeout
+        // Retry on connection timeout with exponential backoff
         if (retries > 0) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          const backoffMs = this.calculateBackoff(retries);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
           return this.getImpl<T>(endpoint, retries - 1);
         }
         throw new Error('Connection timeout - Reddit may be blocked or network is unstable');

@@ -63,43 +63,103 @@ async function setupAuth() {
     let password = '';
 
     if (username) {
-      // Hide password input
+      // Hide password input with proper error handling and cleanup
       const passwordQuestion = 'Reddit Password: ';
       process.stdout.write(passwordQuestion);
 
-      // Disable echo for password
-      process.stdin.setRawMode(true);
-      process.stdin.resume();
-
-      password = await new Promise<string>((resolve) => {
+      password = await new Promise<string>((resolve, reject) => {
+        const PASSWORD_TIMEOUT_MS = 60000; // 60 second timeout to prevent hanging
+        const MAX_PASSWORD_LENGTH = 256; // Reasonable password length limit
         let pwd = '';
-        process.stdin.on('data', (char) => {
+        let isResolved = false;
+        let timeoutId: NodeJS.Timeout | null = null;
+
+        // Set timeout to prevent hanging if user doesn't respond
+        timeoutId = setTimeout(() => {
+          if (!isResolved) {
+            isResolved = true;
+            try {
+              process.stdin.setRawMode(false);
+            } catch {
+              // Raw mode might already be disabled
+            }
+            process.stdin.pause();
+            process.stdin.removeAllListeners('data');
+            process.stdout.write('\n');
+            reject(new Error('Password input timeout'));
+          }
+        }, PASSWORD_TIMEOUT_MS);
+
+        const dataHandler = (char: Buffer) => {
+          if (isResolved) return;
+
           const charStr = char.toString('utf8');
           switch (charStr) {
             case '\n':
             case '\r':
-            case '\u0004':
-              process.stdin.setRawMode(false);
+            case '\u0004': // EOF
+              if (timeoutId) clearTimeout(timeoutId);
+              isResolved = true;
+              try {
+                process.stdin.setRawMode(false);
+              } catch {
+                // Raw mode might already be disabled
+              }
               process.stdin.pause();
+              process.stdin.removeAllListeners('data');
               process.stdout.write('\n');
-              resolve(pwd);
+              // Clear pwd reference and resolve
+              const result = pwd;
+              pwd = ''; // Try to clear from memory
+              resolve(result);
               break;
-            case '\u0003':
+            case '\u0003': // Ctrl+C
+              if (timeoutId) clearTimeout(timeoutId);
+              try {
+                process.stdin.setRawMode(false);
+              } catch {
+                // Raw mode might already be disabled
+              }
+              process.stdin.pause();
+              process.stdin.removeAllListeners('data');
+              pwd = ''; // Clear password
               process.exit();
               break;
-            case '\u007f':
+            case '\u007f': // Backspace
               if (pwd.length > 0) {
                 pwd = pwd.slice(0, -1);
                 process.stdout.write('\b \b');
               }
               break;
             default:
-              pwd += charStr;
-              process.stdout.write('*');
+              // Prevent excessively long passwords
+              if (pwd.length < MAX_PASSWORD_LENGTH) {
+                pwd += charStr;
+                process.stdout.write('*');
+              }
               break;
           }
-        });
+        };
+
+        try {
+          process.stdin.setRawMode(true);
+          process.stdin.resume();
+          process.stdin.on('data', dataHandler);
+        } catch (error) {
+          if (timeoutId) clearTimeout(timeoutId);
+          pwd = ''; // Clear password
+          reject(error);
+        }
+      }).catch((error) => {
+        console.error('\n❌ Password input error:', error.message);
+        process.exit(1);
       });
+    }
+
+    // Validate password if provided
+    if (password && password.length < 1) {
+      console.error('\n❌ Password cannot be empty');
+      process.exit(1);
     }
 
     // Test the credentials
@@ -143,9 +203,13 @@ async function setupAuth() {
 
       console.error('\nError:', error.message);
 
-      // Clear invalid config
+      // Clear invalid config and password from memory
       await authManager.clear();
+      password = ''; // Clear password from memory
       process.exit(1);
+    } finally {
+      // Always clear password from memory after use
+      password = '';
     }
   } finally {
     rl.close();
@@ -155,32 +219,82 @@ async function setupAuth() {
 async function startServer() {
   // Check if running in development
   const isDev = process.env.NODE_ENV === 'development';
-  
+
   if (isDev) {
     // Development mode - run TypeScript directly
     const serverPath = join(__dirname, 'index.ts');
-    const child = spawn('tsx', [serverPath], {
-      stdio: 'inherit',
-      env: { ...process.env },
-    });
-    
-    child.on('error', (error) => {
-      console.error('Failed to start server:', error);
+
+    // Improved child process error handling
+    let child: any;
+    try {
+      child = spawn('tsx', [serverPath], {
+        stdio: 'inherit',
+        env: { ...process.env },
+      });
+
+      // Verify child process was created successfully
+      if (!child || !child.pid) {
+        throw new Error('Failed to create child process');
+      }
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('❌ Failed to spawn development server:', errorMsg);
+
+      // Check if tsx is not installed
+      if (errorMsg.includes('ENOENT') || errorMsg.includes('not found')) {
+        console.error('\nNote: Development mode requires tsx to be installed.');
+        console.error('Run: npm install');
+      }
+      process.exit(1);
+    }
+
+    // Handle errors after spawn
+    child.on('error', (error: any) => {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('❌ Child process error:', errorMsg);
       process.exit(1);
     });
-    
-    child.on('exit', (code) => {
+
+    // Handle unexpected exit
+    child.on('exit', (code: number | null, signal: string | null) => {
+      if (code && code !== 0) {
+        console.error(`❌ Server exited with code ${code}`);
+      } else if (signal) {
+        console.error(`❌ Server terminated by signal ${signal}`);
+      }
       process.exit(code || 0);
     });
   } else {
-    // Production mode - run compiled JavaScript
+    // Production mode - run compiled JavaScript with improved error handling
     const serverPath = join(__dirname, 'index.js');
-    
-    // Dynamic import to run the server
+
+    // Improved dynamic import error handling
     try {
+      // Check if the file exists first
+      const { promises: fs } = await import('fs');
+      try {
+        await fs.access(serverPath);
+      } catch {
+        throw new Error(`Server file not found: ${serverPath}. Run: npm run build`);
+      }
+
+      // Attempt dynamic import
       await import(serverPath);
-    } catch (error) {
-      console.error('Failed to start server:', error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      if (errorMsg.includes('not found') || errorMsg.includes('ENOENT')) {
+        console.error('❌ Server file not found. Run: npm run build');
+      } else if (errorMsg.includes('Cannot find module')) {
+        console.error('❌ Module import error:', errorMsg);
+        console.error('Try running: npm install');
+      } else if (errorMsg.includes('Unexpected token')) {
+        console.error('❌ Syntax error in server code:', errorMsg);
+        console.error('Try running: npm run typecheck');
+      } else {
+        console.error('❌ Failed to start server:', errorMsg);
+      }
+
       process.exit(1);
     }
   }

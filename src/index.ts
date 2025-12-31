@@ -5,8 +5,14 @@
 
 import { startStdioServer, startHttpServer } from './mcp-server.js';
 
+// Parse boolean environment variables (handles various truthy formats)
+function parseEnvBoolean(envValue: string | undefined, defaultValue: boolean = false): boolean {
+  if (!envValue) return defaultValue;
+  return ['true', '1', 'yes', 'on'].includes(envValue.toLowerCase().trim());
+}
+
 // Determine transport mode from environment
-const isHttpMode = process.env.REDDIT_BUDDY_HTTP === 'true';
+const isHttpMode = parseEnvBoolean(process.env.REDDIT_BUDDY_HTTP);
 
 // Parse and validate port number
 function parsePort(portEnv: string | undefined): number {
