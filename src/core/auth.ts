@@ -5,6 +5,7 @@
 import { homedir, platform } from 'os';
 import { join } from 'path';
 import { promises as fs } from 'fs';
+import { z } from 'zod';
 
 export interface AuthConfig {
   clientId: string;
@@ -17,6 +18,14 @@ export interface AuthConfig {
   scope?: string;
   userAgent?: string;
 }
+
+// Zod schema for OAuth token response validation
+const OAuthTokenResponseSchema = z.object({
+  access_token: z.string().min(1, 'access_token must not be empty'),
+  token_type: z.string().min(1, 'token_type must not be empty'),
+  expires_in: z.number().positive('expires_in must be positive'),
+  scope: z.string(),
+}).strict().passthrough(); // Strict mode + passthrough for extra fields
 
 export class AuthManager {
   private config: AuthConfig | null = null;
@@ -108,7 +117,7 @@ export class AuthManager {
     try {
       // Ensure directory exists
       await fs.mkdir(this.configPath, { recursive: true });
-      
+
       // Save config
       const configFile = join(this.configPath, 'auth.json');
       await fs.writeFile(
@@ -116,7 +125,20 @@ export class AuthManager {
         JSON.stringify(config, null, 2),
         { mode: 0o600 } // Read/write for owner only
       );
-      
+
+      // Verify file permissions were actually applied (security check)
+      const stats = await fs.stat(configFile);
+      const mode = stats.mode & parseInt('777', 8); // Extract permission bits
+      if (mode !== 0o600) {
+        console.error(`Warning: Auth file permissions are ${mode.toString(8)}, expected 600`);
+        // On some systems, chmod after write may be needed
+        try {
+          await fs.chmod(configFile, 0o600);
+        } catch (chmodError) {
+          throw new Error(`Failed to set auth file permissions to 0o600: ${chmodError}`);
+        }
+      }
+
       this.config = config;
     } catch (error) {
       throw new Error(`Failed to save auth configuration: ${error}`);
@@ -204,12 +226,25 @@ export class AuthManager {
         throw new Error(`Failed to get access token: ${response.status} - ${error}`);
       }
 
-      const data = await response.json() as {
-        access_token: string;
-        token_type: string;
-        expires_in: number;
-        scope: string;
-      };
+      const rawData = await response.json();
+
+      // Validate token response structure
+      let data;
+      try {
+        data = OAuthTokenResponseSchema.parse(rawData);
+      } catch (validationError) {
+        if (validationError instanceof z.ZodError) {
+          const issues = validationError.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+          throw new Error(`Invalid OAuth token response format: ${issues}`);
+        }
+        throw new Error('Failed to validate OAuth token response');
+      }
+
+      // Validate token format (basic JWT-like check)
+      const tokenParts = data.access_token.split('.');
+      if (tokenParts.length < 1 || data.access_token.length < 10) {
+        throw new Error('Invalid access token format received from Reddit');
+      }
 
       // Update config
       this.config.accessToken = data.access_token;

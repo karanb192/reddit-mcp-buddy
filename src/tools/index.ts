@@ -134,8 +134,8 @@ export class RedditTools {
           limit: params.limit,
         });
       } else {
-        // Multiple subreddits - parallel search
-        const searchPromises = params.subreddits.map(sub => 
+        // Multiple subreddits - parallel search with failure tolerance
+        const searchPromises = params.subreddits.map(sub =>
           this.api.search(params.query, {
             subreddit: sub,
             sort: params.sort,
@@ -143,14 +143,35 @@ export class RedditTools {
             limit: Math.ceil(params.limit! / params.subreddits!.length),
           })
         );
-        
-        const allResults = await Promise.all(searchPromises);
-        
-        // Combine results
+
+        // Use allSettled to handle individual subreddit failures gracefully
+        const allResults = await Promise.allSettled(searchPromises);
+
+        // Combine results from successful searches, skip failed ones
+        const successfulResults = allResults
+          .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
+          .map(result => result.value);
+
+        const failedSubreddits = allResults
+          .map((result, index) => ({ status: result.status, sub: params.subreddits![index] }))
+          .filter(item => item.status === 'rejected')
+          .map(item => item.sub);
+
+        // Log any failures
+        if (failedSubreddits.length > 0) {
+          console.warn(`Search failed for subreddits: ${failedSubreddits.join(', ')}`);
+        }
+
+        // If all searches failed, throw error
+        if (successfulResults.length === 0) {
+          throw new Error(`Search failed for all subreddits: ${failedSubreddits.join(', ')}`);
+        }
+
+        // Combine results from successful searches
         results = {
           kind: 'Listing',
           data: {
-            children: allResults.flatMap(r => r.data.children),
+            children: successfulResults.flatMap(r => r.data.children),
             after: null,
             before: null,
           }

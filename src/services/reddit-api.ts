@@ -370,6 +370,14 @@ export class RedditAPI {
 
       // Handle errors
       if (!response.ok) {
+        // Retry on transient errors (503, 429)
+        if ((response.status === 503 || response.status === 429) && retries > 0) {
+          // Service unavailable or too many requests - exponential backoff
+          const backoffMs = (2 - retries) * 1000; // 1s, then 2s
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          return this.get<T>(endpoint, retries - 1);
+        }
+
         if (response.status === 404) {
           // Extract subreddit name from URL if possible
           const subredditMatch = endpoint.match(/\/r\/([^\/]+)/);
@@ -421,10 +429,20 @@ export class RedditAPI {
       console.error('Reddit API Error:', error.message || error);
 
       if (error.name === 'AbortError') {
+        // Retry on timeout if retries available
+        if (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return this.get<T>(endpoint, retries - 1);
+        }
         throw new Error('Request timeout (10s exceeded) - Reddit may be slow or unreachable. Try again or check if Reddit is blocked on your network.');
       }
 
-      // Common network errors
+      // Common network errors - retry transient ones
+      if (error.code === 'ECONNRESET' && retries > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return this.get<T>(endpoint, retries - 1);
+      }
+
       if (error.code === 'ENOTFOUND') {
         throw new Error('Cannot resolve Reddit domain - check DNS settings or if Reddit is blocked by your ISP/firewall');
       }
@@ -433,7 +451,12 @@ export class RedditAPI {
         throw new Error('Connection refused - Reddit may be blocked by firewall or network policy');
       }
 
-      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+      if (error.code === 'ETIMEDOUT') {
+        // Retry on connection timeout
+        if (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return this.get<T>(endpoint, retries - 1);
+        }
         throw new Error('Connection timeout - Reddit may be blocked or network is unstable');
       }
 

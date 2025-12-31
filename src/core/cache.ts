@@ -174,9 +174,10 @@ export class CacheManager {
 
     for (const [key, entry] of this.cache.entries()) {
       // Score based on hits and age
-      const age = Date.now() - entry.timestamp;
+      // Prevent division by zero when age is 0 (newly added entry)
+      const age = Math.max(1, Date.now() - entry.timestamp); // At least 1ms
       const score = entry.hits / (age / 1000); // Hits per second
-      
+
       if (score < minScore) {
         minScore = score;
         lruKey = key;
