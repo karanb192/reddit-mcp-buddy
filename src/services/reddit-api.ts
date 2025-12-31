@@ -27,6 +27,8 @@ export class RedditAPI {
   private timeout: number;
   private baseUrl = 'https://www.reddit.com';
   private oauthUrl = 'https://oauth.reddit.com';
+  // Request deduplication: Map of in-flight requests keyed by endpoint
+  private inFlightRequests: Map<string, Promise<any>> = new Map();
 
   constructor(options: RedditAPIOptions) {
     this.auth = options.authManager;
@@ -324,9 +326,33 @@ export class RedditAPI {
   }
 
   /**
-   * Private: Make GET request to Reddit API with retry logic
+   * Private: Make GET request to Reddit API with retry logic and deduplication
    */
   private async get<T>(endpoint: string, retries: number = 2): Promise<T> {
+    // Check for in-flight request (deduplication)
+    const inFlightRequest = this.inFlightRequests.get(endpoint);
+    if (inFlightRequest) {
+      return inFlightRequest as Promise<T>;
+    }
+
+    // Create promise for this request
+    const requestPromise = this.getImpl<T>(endpoint, retries);
+
+    // Track the in-flight request
+    this.inFlightRequests.set(endpoint, requestPromise);
+
+    // Clean up when done (success or error)
+    requestPromise.finally(() => {
+      this.inFlightRequests.delete(endpoint);
+    });
+
+    return requestPromise;
+  }
+
+  /**
+   * Private: Implementation of GET request with retry logic
+   */
+  private async getImpl<T>(endpoint: string, retries: number = 2): Promise<T> {
     // Check rate limit
     if (!this.rateLimiter.canMakeRequest()) {
       const isAuth = this.auth.isAuthenticated();
@@ -362,7 +388,7 @@ export class RedditAPI {
           await this.auth.refreshAccessToken();
           headers = await this.auth.getHeaders();
           // Retry with new token
-          return this.get<T>(endpoint, retries - 1);
+          return this.getImpl<T>(endpoint, retries - 1);
         } catch (refreshError) {
           throw new Error('Authentication failed. Please run: reddit-mcp-buddy --auth');
         }
@@ -375,7 +401,7 @@ export class RedditAPI {
           // Service unavailable or too many requests - exponential backoff
           const backoffMs = (2 - retries) * 1000; // 1s, then 2s
           await new Promise(resolve => setTimeout(resolve, backoffMs));
-          return this.get<T>(endpoint, retries - 1);
+          return this.getImpl<T>(endpoint, retries - 1);
         }
 
         if (response.status === 404) {
@@ -432,7 +458,7 @@ export class RedditAPI {
         // Retry on timeout if retries available
         if (retries > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
-          return this.get<T>(endpoint, retries - 1);
+          return this.getImpl<T>(endpoint, retries - 1);
         }
         throw new Error('Request timeout (10s exceeded) - Reddit may be slow or unreachable. Try again or check if Reddit is blocked on your network.');
       }
@@ -440,7 +466,7 @@ export class RedditAPI {
       // Common network errors - retry transient ones
       if (error.code === 'ECONNRESET' && retries > 0) {
         await new Promise(resolve => setTimeout(resolve, 1000));
-        return this.get<T>(endpoint, retries - 1);
+        return this.getImpl<T>(endpoint, retries - 1);
       }
 
       if (error.code === 'ENOTFOUND') {
@@ -455,7 +481,7 @@ export class RedditAPI {
         // Retry on connection timeout
         if (retries > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
-          return this.get<T>(endpoint, retries - 1);
+          return this.getImpl<T>(endpoint, retries - 1);
         }
         throw new Error('Connection timeout - Reddit may be blocked or network is unstable');
       }

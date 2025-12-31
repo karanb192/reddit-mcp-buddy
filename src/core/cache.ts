@@ -7,6 +7,7 @@ interface CacheEntry<T> {
   timestamp: number;
   size: number;
   hits: number;
+  expiresAt: number; // When this entry expires (milliseconds since epoch)
 }
 
 interface CacheOptions {
@@ -48,30 +49,29 @@ export class CacheManager {
    */
   get<T>(key: string): T | null {
     const entry = this.cache.get(key);
-    
+
     if (!entry) {
       return null;
     }
 
-    // Check if expired
-    const ttl = this.getTTLForKey(key);
-    if (Date.now() - entry.timestamp > ttl) {
+    // Check if expired using expiresAt field
+    if (Date.now() >= entry.expiresAt) {
       this.delete(key);
       return null;
     }
 
     // Update hit count for LRU tracking
     entry.hits++;
-    
+
     return entry.data as T;
   }
 
   /**
    * Set item in cache with automatic size management
    */
-  set<T>(key: string, data: T, _customTTL?: number): void {
+  set<T>(key: string, data: T, customTTL?: number): void {
     const size = this.estimateSize(data);
-    
+
     // Evict entries if needed to make room
     while (this.sizeUsed + size > this.maxSize && this.cache.size > 0) {
       this.evictLRU();
@@ -82,16 +82,50 @@ export class CacheManager {
       this.delete(key);
     }
 
+    // Determine TTL: custom > pattern-based > default
+    let ttl = this.defaultTTL;
+    if (customTTL !== undefined && customTTL > 0) {
+      ttl = customTTL;
+    } else {
+      // Check if key matches any pattern
+      for (const [pattern, patternTTL] of this.ttlByPattern.entries()) {
+        if (pattern.test(key)) {
+          ttl = patternTTL;
+          break;
+        }
+      }
+    }
+
     // Add new entry
+    const now = Date.now();
     const entry: CacheEntry<T> = {
       data,
-      timestamp: Date.now(),
+      timestamp: now,
+      expiresAt: now + ttl,
       size,
       hits: 0
     };
 
     this.cache.set(key, entry);
     this.sizeUsed += size;
+  }
+
+  /**
+   * Check if key exists in cache and is not expired
+   */
+  has(key: string): boolean {
+    const entry = this.cache.get(key);
+    if (!entry) {
+      return false;
+    }
+
+    // Check if expired
+    if (Date.now() >= entry.expiresAt) {
+      this.delete(key);
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -143,18 +177,6 @@ export class CacheManager {
   }
 
   /**
-   * Private: Get TTL for a specific key based on patterns
-   */
-  private getTTLForKey(key: string): number {
-    for (const [pattern, ttl] of this.ttlByPattern) {
-      if (pattern.test(key)) {
-        return ttl;
-      }
-    }
-    return this.defaultTTL;
-  }
-
-  /**
    * Private: Estimate size of data in bytes
    */
   private estimateSize(data: any): number {
@@ -197,8 +219,8 @@ export class CacheManager {
     const keysToDelete: string[] = [];
 
     for (const [key, entry] of this.cache.entries()) {
-      const ttl = this.getTTLForKey(key);
-      if (now - entry.timestamp > ttl) {
+      // Use expiresAt field for cleanup
+      if (now >= entry.expiresAt) {
         keysToDelete.push(key);
       }
     }
