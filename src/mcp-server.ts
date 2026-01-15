@@ -29,7 +29,7 @@ import {
 
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
-export const SERVER_VERSION = '1.1.10';
+export const SERVER_VERSION = '1.1.12';
 
 // MCP Response validation schemas (per MCP spec)
 const ContentBlockSchema = z.object({
