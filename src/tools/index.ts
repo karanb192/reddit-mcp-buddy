@@ -500,11 +500,60 @@ export class RedditTools {
     };
   }
 
+  /**
+   * Extract post ID and subreddit from various Reddit URL formats
+   * Supports:
+   * - www.reddit.com/r/subreddit/comments/postid/...
+   * - old.reddit.com/r/subreddit/comments/postid/...
+   * - np.reddit.com/r/subreddit/comments/postid/... (No Participation)
+   * - m.reddit.com/r/subreddit/comments/postid/... (Mobile)
+   * - reddit.com/r/subreddit/comments/postid/...
+   * - redd.it/postid (short URL - subreddit unknown)
+   * - URLs with query parameters (?utm_source=...)
+   * - URLs with fragments (#comment)
+   */
   private extractPostIdFromUrl(url: string): string {
-    const match = url.match(/\/r\/(\w+)\/comments\/(\w+)/);
-    if (match) {
-      return `${match[1]}_${match[2]}`;
+    // Normalize URL: remove query params and fragments for matching
+    const cleanUrl = url.split('?')[0].split('#')[0];
+
+    // Standard Reddit URL pattern (handles www, old, np, m, or no subdomain)
+    // Matches: reddit.com, www.reddit.com, old.reddit.com, np.reddit.com, m.reddit.com
+    const standardMatch = cleanUrl.match(
+      /(?:https?:\/\/)?(?:(?:www|old|np|m|new)\.)?reddit\.com\/r\/(\w+)\/comments\/(\w+)/i
+    );
+    if (standardMatch) {
+      return `${standardMatch[1]}_${standardMatch[2]}`;
     }
-    throw new Error('Invalid Reddit post URL');
+
+    // Short URL pattern: redd.it/postid
+    const shortMatch = cleanUrl.match(
+      /(?:https?:\/\/)?redd\.it\/(\w+)/i
+    );
+    if (shortMatch) {
+      // For short URLs, we only have the post ID, not the subreddit
+      // Return with empty subreddit marker - caller must handle this
+      return `_${shortMatch[1]}`;
+    }
+
+    // Cross-post or share URL pattern: reddit.com/comments/postid
+    const crosspostMatch = cleanUrl.match(
+      /(?:https?:\/\/)?(?:(?:www|old|np|m|new)\.)?reddit\.com\/comments\/(\w+)/i
+    );
+    if (crosspostMatch) {
+      return `_${crosspostMatch[1]}`;
+    }
+
+    // Gallery URL pattern: reddit.com/gallery/postid
+    const galleryMatch = cleanUrl.match(
+      /(?:https?:\/\/)?(?:(?:www|old|np|m|new)\.)?reddit\.com\/gallery\/(\w+)/i
+    );
+    if (galleryMatch) {
+      return `_${galleryMatch[1]}`;
+    }
+
+    throw new Error(
+      'Invalid Reddit URL format. Supported formats: ' +
+      'reddit.com/r/subreddit/comments/id, old.reddit.com/..., np.reddit.com/..., redd.it/id'
+    );
   }
 }

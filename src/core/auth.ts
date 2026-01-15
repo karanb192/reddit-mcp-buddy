@@ -107,11 +107,40 @@ export class AuthManager {
 
     // Treat unresolved template strings as undefined
     // (happens when Claude Desktop doesn't have the config value set)
-    if (trimmed.startsWith('${') && trimmed.endsWith('}')) {
+    // Handles various template patterns:
+    // - ${VAR} - standard template
+    // - ${VAR:-default} - template with default
+    // - ${${VAR}} - nested template
+    // - ${ or } alone - partial/malformed templates
+    // - ${VAR}${VAR2} - multiple templates
+    if (this.containsUnresolvedTemplate(trimmed)) {
       return undefined;
     }
 
     return trimmed;
+  }
+
+  /**
+   * Check if a string contains unresolved template patterns
+   */
+  private containsUnresolvedTemplate(value: string): boolean {
+    // Check for any ${...} pattern (including nested, with defaults, etc.)
+    if (/\$\{[^}]*\}/.test(value)) {
+      return true;
+    }
+
+    // Check for unclosed template start: ${ without matching }
+    if (value.includes('${') && !value.includes('}')) {
+      return true;
+    }
+
+    // Check for orphaned template syntax that looks like unresolved vars
+    // e.g., "$REDDIT_CLIENT_ID" without braces (common in some configs)
+    if (/\$[A-Z_][A-Z0-9_]*/.test(value)) {
+      return true;
+    }
+
+    return false;
   }
 
   /**

@@ -490,9 +490,14 @@ export class RedditAPI {
 
       // Try to parse JSON
       const contentType = response.headers.get('content-type');
-      
-      if (contentType && contentType.includes('text/html')) {
-        throw new Error('Reddit returned HTML instead of JSON - the subreddit may be inaccessible or there may be a Reddit issue');
+
+      // Check for HTML responses (handles case variations and charset parameters)
+      // Examples: "text/html", "TEXT/HTML", "text/html; charset=utf-8", "application/xhtml+xml"
+      if (contentType) {
+        const normalizedType = contentType.toLowerCase().split(';')[0].trim();
+        if (normalizedType === 'text/html' || normalizedType === 'application/xhtml+xml') {
+          throw new Error('Reddit returned HTML instead of JSON - the subreddit may be inaccessible or there may be a Reddit issue');
+        }
       }
       
       const data = await response.json();

@@ -12,7 +12,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { zodToJsonSchema, JsonSchema7Type } from 'zod-to-json-schema';
 
 import { AuthManager } from './core/auth.js';
 import { CacheManager } from './core/cache.js';
@@ -49,6 +49,41 @@ const ToolResultResponseSchema = z.object({
 
 // Type for validated MCP responses
 type ToolResultResponse = z.infer<typeof ToolResultResponseSchema>;
+
+/**
+ * Convert Zod schema to MCP-compatible JSON Schema with proper typing
+ * Ensures the output is valid for MCP tool definitions
+ */
+function zodSchemaToMCPInputSchema(schema: z.ZodTypeAny, schemaName: string): Tool['inputSchema'] {
+  try {
+    const jsonSchema = zodToJsonSchema(schema, {
+      name: schemaName,
+      target: 'jsonSchema7',
+      $refStrategy: 'none', // Inline all refs for MCP compatibility
+    }) as JsonSchema7Type & { properties?: Record<string, unknown> };
+
+    // Validate that the schema has required properties for MCP
+    if (typeof jsonSchema !== 'object' || jsonSchema === null) {
+      throw new Error(`Invalid schema output for ${schemaName}`);
+    }
+
+    // MCP expects an object schema with properties
+    // Extract the inner schema if zodToJsonSchema wrapped it
+    if ('definitions' in jsonSchema && schemaName in (jsonSchema as any).definitions) {
+      return (jsonSchema as any).definitions[schemaName] as Tool['inputSchema'];
+    }
+
+    return jsonSchema as Tool['inputSchema'];
+  } catch (error) {
+    console.error(`Failed to convert schema ${schemaName}:`, error);
+    // Return a minimal valid schema as fallback
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: true,
+    } as Tool['inputSchema'];
+  }
+}
 
 /**
  * Helper function to create a validated MCP response
@@ -159,36 +194,36 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
     }
   );
   
-  // Generate tool definitions from Zod schemas
+  // Generate tool definitions from Zod schemas with proper type conversion
   const toolDefinitions: Tool[] = [
     {
       name: 'browse_subreddit',
       description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising). Returns post list with content, scores, and metadata.',
-      inputSchema: zodToJsonSchema(browseSubredditSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(browseSubredditSchema, 'browse_subreddit'),
       readOnlyHint: true
     },
     {
       name: 'search_reddit',
       description: 'Search for posts across Reddit or specific subreddits. Returns matching posts with content and metadata.',
-      inputSchema: zodToJsonSchema(searchRedditSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(searchRedditSchema, 'search_reddit'),
       readOnlyHint: true
     },
     {
       name: 'get_post_details',
       description: 'Fetch a Reddit post with its comments. Requires EITHER url OR post_id. IMPORTANT: When using post_id alone, an extra API call is made to fetch the subreddit first (2 calls total). For better efficiency, always provide the subreddit parameter when known (1 call total).',
-      inputSchema: zodToJsonSchema(getPostDetailsSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(getPostDetailsSchema, 'get_post_details'),
       readOnlyHint: true
     },
     {
       name: 'user_analysis',
       description: 'Analyze a Reddit user\'s posting history, karma, and activity patterns. Returns posts, comments, and statistics.',
-      inputSchema: zodToJsonSchema(userAnalysisSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(userAnalysisSchema, 'user_analysis'),
       readOnlyHint: true
     },
     {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
-      inputSchema: zodToJsonSchema(redditExplainSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(redditExplainSchema, 'reddit_explain'),
       readOnlyHint: true
     }
   ];
