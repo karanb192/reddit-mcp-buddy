@@ -72,6 +72,12 @@ export class CacheManager {
   set<T>(key: string, data: T, customTTL?: number): void {
     const size = this.estimateSize(data);
 
+    // Skip caching if item is larger than max cache size (prevent infinite eviction loop)
+    if (size > this.maxSize) {
+      console.warn(`⚠️ Cache: item size (${(size / 1024 / 1024).toFixed(2)}MB) exceeds max cache size (${(this.maxSize / 1024 / 1024).toFixed(2)}MB), skipping cache`);
+      return;
+    }
+
     // Evict entries if needed to make room
     while (this.sizeUsed + size > this.maxSize && this.cache.size > 0) {
       this.evictLRU();
@@ -167,8 +173,8 @@ export class CacheManager {
   }
 
   /**
-   * Generate cache key with validation
-   * Ensures cache keys are unique, properly formatted, and don't contain invalid characters
+   * Generate cache key with sanitization
+   * Ensures cache keys are unique and properly formatted
    */
   static createKey(...parts: (string | number | boolean | undefined)[]): string {
     // Filter out undefined/null values
@@ -178,25 +184,27 @@ export class CacheManager {
       throw new Error('Cache key must have at least one part');
     }
 
-    // Convert all parts to strings and validate
+    // Convert all parts to strings and sanitize
     const stringParts = validParts.map((p) => {
       const str = String(p).toLowerCase().trim();
       if (str.length === 0) {
         throw new Error('Cache key parts cannot be empty strings');
       }
-      // Validate characters (alphanumeric, underscore, hyphen only)
-      if (!/^[a-z0-9_-]+$/.test(str)) {
-        throw new Error(`Invalid cache key part: "${str}" contains invalid characters`);
-      }
-      return str;
+      // Sanitize: replace invalid characters with underscores
+      // This allows search queries like "machine learning" or "what is AI?" to work
+      return str.replace(/[^a-z0-9_-]/g, '_');
     });
 
-    // Join with colons and validate final key
-    const key = stringParts.join(':');
+    // Join with colons
+    let key = stringParts.join(':');
 
-    // Sanity check: key shouldn't be too long (prevents accidental misuse)
+    // Truncate if too long (max 256 chars) - use hash suffix for uniqueness
     if (key.length > 256) {
-      throw new Error(`Cache key too long: ${key.length} > 256 characters`);
+      // Simple hash to preserve uniqueness when truncating
+      const hash = key.split('').reduce((acc, char) => {
+        return ((acc << 5) - acc + char.charCodeAt(0)) | 0;
+      }, 0).toString(36);
+      key = key.substring(0, 245) + '_' + hash;
     }
 
     return key;
