@@ -134,8 +134,8 @@ export class RedditTools {
           limit: params.limit,
         });
       } else {
-        // Multiple subreddits - parallel search
-        const searchPromises = params.subreddits.map(sub => 
+        // Multiple subreddits - parallel search with failure tolerance
+        const searchPromises = params.subreddits.map(sub =>
           this.api.search(params.query, {
             subreddit: sub,
             sort: params.sort,
@@ -143,14 +143,35 @@ export class RedditTools {
             limit: Math.ceil(params.limit! / params.subreddits!.length),
           })
         );
-        
-        const allResults = await Promise.all(searchPromises);
-        
-        // Combine results
+
+        // Use allSettled to handle individual subreddit failures gracefully
+        const allResults = await Promise.allSettled(searchPromises);
+
+        // Combine results from successful searches, skip failed ones
+        const successfulResults = allResults
+          .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
+          .map(result => result.value);
+
+        const failedSubreddits = allResults
+          .map((result, index) => ({ status: result.status, sub: params.subreddits![index] }))
+          .filter(item => item.status === 'rejected')
+          .map(item => item.sub);
+
+        // Log any failures
+        if (failedSubreddits.length > 0) {
+          console.warn(`Search failed for subreddits: ${failedSubreddits.join(', ')}`);
+        }
+
+        // If all searches failed, throw error
+        if (successfulResults.length === 0) {
+          throw new Error(`Search failed for all subreddits: ${failedSubreddits.join(', ')}`);
+        }
+
+        // Combine results from successful searches
         results = {
           kind: 'Listing',
           data: {
-            children: allResults.flatMap(r => r.data.children),
+            children: successfulResults.flatMap(r => r.data.children),
             after: null,
             before: null,
           }
@@ -352,18 +373,24 @@ export class RedditTools {
 
       // Add comments even when there are no posts
       if (comments && comments.data.children.length > 0) {
-        summary.recentComments = comments.data.children.map(child => {
-          const comment = child.data as any;
-          return {
-            id: comment.id,
-            body: comment.body?.substring(0, 200) + (comment.body?.length > 200 ? '...' : ''),
-            score: comment.score,
-            subreddit: comment.subreddit || 'unknown',
-            postTitle: comment.link_title,
-            created: new Date(comment.created_utc * 1000),
-            url: `https://reddit.com${comment.permalink}`,
-          };
-        });
+        // Filter out deleted comments (where data is null) and safely extract data
+        summary.recentComments = comments.data.children
+          .filter(child => child.data !== null && child.data !== undefined)
+          .map(child => {
+            const comment = child.data as any;
+            // Safely handle deleted/removed comments
+            if (!comment.id || !comment.body) return null;
+            return {
+              id: comment.id,
+              body: comment.body.substring(0, 200) + (comment.body.length > 200 ? '...' : ''),
+              score: comment.score || 0,
+              subreddit: comment.subreddit || 'unknown',
+              postTitle: comment.link_title || 'deleted',
+              created: new Date((comment.created_utc || 0) * 1000),
+              url: comment.permalink ? `https://reddit.com${comment.permalink}` : null,
+            };
+          })
+          .filter(c => c !== null); // Remove any null entries from filtering
       }
     }
 
@@ -473,11 +500,60 @@ export class RedditTools {
     };
   }
 
+  /**
+   * Extract post ID and subreddit from various Reddit URL formats
+   * Supports:
+   * - www.reddit.com/r/subreddit/comments/postid/...
+   * - old.reddit.com/r/subreddit/comments/postid/...
+   * - np.reddit.com/r/subreddit/comments/postid/... (No Participation)
+   * - m.reddit.com/r/subreddit/comments/postid/... (Mobile)
+   * - reddit.com/r/subreddit/comments/postid/...
+   * - redd.it/postid (short URL - subreddit unknown)
+   * - URLs with query parameters (?utm_source=...)
+   * - URLs with fragments (#comment)
+   */
   private extractPostIdFromUrl(url: string): string {
-    const match = url.match(/\/r\/(\w+)\/comments\/(\w+)/);
-    if (match) {
-      return `${match[1]}_${match[2]}`;
+    // Normalize URL: remove query params and fragments for matching
+    const cleanUrl = url.split('?')[0].split('#')[0];
+
+    // Standard Reddit URL pattern (handles www, old, np, m, or no subdomain)
+    // Matches: reddit.com, www.reddit.com, old.reddit.com, np.reddit.com, m.reddit.com
+    const standardMatch = cleanUrl.match(
+      /(?:https?:\/\/)?(?:(?:www|old|np|m|new)\.)?reddit\.com\/r\/(\w+)\/comments\/(\w+)/i
+    );
+    if (standardMatch) {
+      return `${standardMatch[1]}_${standardMatch[2]}`;
     }
-    throw new Error('Invalid Reddit post URL');
+
+    // Short URL pattern: redd.it/postid
+    const shortMatch = cleanUrl.match(
+      /(?:https?:\/\/)?redd\.it\/(\w+)/i
+    );
+    if (shortMatch) {
+      // For short URLs, we only have the post ID, not the subreddit
+      // Return with empty subreddit marker - caller must handle this
+      return `_${shortMatch[1]}`;
+    }
+
+    // Cross-post or share URL pattern: reddit.com/comments/postid
+    const crosspostMatch = cleanUrl.match(
+      /(?:https?:\/\/)?(?:(?:www|old|np|m|new)\.)?reddit\.com\/comments\/(\w+)/i
+    );
+    if (crosspostMatch) {
+      return `_${crosspostMatch[1]}`;
+    }
+
+    // Gallery URL pattern: reddit.com/gallery/postid
+    const galleryMatch = cleanUrl.match(
+      /(?:https?:\/\/)?(?:(?:www|old|np|m|new)\.)?reddit\.com\/gallery\/(\w+)/i
+    );
+    if (galleryMatch) {
+      return `_${galleryMatch[1]}`;
+    }
+
+    throw new Error(
+      'Invalid Reddit URL format. Supported formats: ' +
+      'reddit.com/r/subreddit/comments/id, old.reddit.com/..., np.reddit.com/..., redd.it/id'
+    );
   }
 }

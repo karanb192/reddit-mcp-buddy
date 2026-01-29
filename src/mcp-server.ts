@@ -10,8 +10,9 @@ import {
   ListToolsRequestSchema,
   Tool
 } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { zodToJsonSchema, JsonSchema7Type } from 'zod-to-json-schema';
 
 import { AuthManager } from './core/auth.js';
 import { CacheManager } from './core/cache.js';
@@ -28,7 +29,96 @@ import {
 
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
-export const SERVER_VERSION = '1.1.10';
+export const SERVER_VERSION = '1.1.12';
+
+// MCP Response validation schemas (per MCP spec)
+const ContentBlockSchema = z.object({
+  type: z.enum(['text', 'image']),
+  text: z.string().optional(),
+  data: z.string().optional(), // For base64 encoded images
+  mimeType: z.string().optional(), // For images
+}).refine(
+  (obj) => obj.type === 'text' ? !!obj.text : (!!obj.data && !!obj.mimeType),
+  'text type requires text field, image type requires data and mimeType fields'
+);
+
+const ToolResultResponseSchema = z.object({
+  content: z.array(ContentBlockSchema).min(1, 'content must have at least one block'),
+  isError: z.boolean().optional(),
+}).strict();
+
+// Type for validated MCP responses
+type ToolResultResponse = z.infer<typeof ToolResultResponseSchema>;
+
+/**
+ * Convert Zod schema to MCP-compatible JSON Schema with proper typing
+ * Ensures the output is valid for MCP tool definitions
+ */
+function zodSchemaToMCPInputSchema(schema: z.ZodTypeAny, schemaName: string): Tool['inputSchema'] {
+  try {
+    const jsonSchema = zodToJsonSchema(schema, {
+      name: schemaName,
+      target: 'jsonSchema7',
+      $refStrategy: 'none', // Inline all refs for MCP compatibility
+    }) as JsonSchema7Type & { properties?: Record<string, unknown> };
+
+    // Validate that the schema has required properties for MCP
+    if (typeof jsonSchema !== 'object' || jsonSchema === null) {
+      throw new Error(`Invalid schema output for ${schemaName}`);
+    }
+
+    // MCP expects an object schema with properties
+    // Extract the inner schema if zodToJsonSchema wrapped it
+    if ('definitions' in jsonSchema && schemaName in (jsonSchema as any).definitions) {
+      return (jsonSchema as any).definitions[schemaName] as Tool['inputSchema'];
+    }
+
+    return jsonSchema as Tool['inputSchema'];
+  } catch (error) {
+    console.error(`Failed to convert schema ${schemaName}:`, error);
+    // Return a minimal valid schema as fallback
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: true,
+    } as Tool['inputSchema'];
+  }
+}
+
+/**
+ * Helper function to create a validated MCP response
+ */
+function createValidatedResponse(text: string, isError: boolean = false): ToolResultResponse {
+  const response = {
+    content: [
+      {
+        type: 'text' as const,
+        text,
+      },
+    ],
+    ...(isError && { isError }),
+  };
+
+  // Validate against MCP spec
+  try {
+    return ToolResultResponseSchema.parse(response);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      // If validation fails, return a safe error response
+      console.error('MCP response validation failed:', error.errors);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Internal error: Invalid response format',
+          },
+        ],
+        isError: true,
+      };
+    }
+    throw error;
+  }
+}
 
 /**
  * Create MCP server with proper protocol implementation
@@ -40,7 +130,10 @@ export async function createMCPServer() {
 
   const rateLimit = authManager.getRateLimit();
   const cacheTTL = authManager.getCacheTTL();
-  const disableCache = process.env.REDDIT_BUDDY_NO_CACHE === 'true';
+  // Parse boolean env var (supports various formats: true, 1, yes, on)
+  const disableCache = ['true', '1', 'yes', 'on'].includes(
+    (process.env.REDDIT_BUDDY_NO_CACHE || '').toLowerCase().trim()
+  );
 
   console.error(`🚀 Reddit MCP Buddy Server v${SERVER_VERSION}`);
   console.error(`📊 Mode: ${authManager.getAuthMode()}`);
@@ -101,36 +194,36 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
     }
   );
   
-  // Generate tool definitions from Zod schemas
+  // Generate tool definitions from Zod schemas with proper type conversion
   const toolDefinitions: Tool[] = [
     {
       name: 'browse_subreddit',
       description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising). Returns post list with content, scores, and metadata.',
-      inputSchema: zodToJsonSchema(browseSubredditSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(browseSubredditSchema, 'browse_subreddit'),
       readOnlyHint: true
     },
     {
       name: 'search_reddit',
       description: 'Search for posts across Reddit or specific subreddits. Returns matching posts with content and metadata.',
-      inputSchema: zodToJsonSchema(searchRedditSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(searchRedditSchema, 'search_reddit'),
       readOnlyHint: true
     },
     {
       name: 'get_post_details',
       description: 'Fetch a Reddit post with its comments. Requires EITHER url OR post_id. IMPORTANT: When using post_id alone, an extra API call is made to fetch the subreddit first (2 calls total). For better efficiency, always provide the subreddit parameter when known (1 call total).',
-      inputSchema: zodToJsonSchema(getPostDetailsSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(getPostDetailsSchema, 'get_post_details'),
       readOnlyHint: true
     },
     {
       name: 'user_analysis',
       description: 'Analyze a Reddit user\'s posting history, karma, and activity patterns. Returns posts, comments, and statistics.',
-      inputSchema: zodToJsonSchema(userAnalysisSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(userAnalysisSchema, 'user_analysis'),
       readOnlyHint: true
     },
     {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
-      inputSchema: zodToJsonSchema(redditExplainSchema) as any,
+      inputSchema: zodSchemaToMCPInputSchema(redditExplainSchema, 'reddit_explain'),
       readOnlyHint: true
     }
   ];
@@ -177,24 +270,10 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
           throw new Error(`Unknown tool: ${name}`);
       }
       
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      return createValidatedResponse(JSON.stringify(result, null, 2), false);
     } catch (error: any) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return createValidatedResponse(`Error: ${errorMessage}`, true);
     }
     }
   };
@@ -219,17 +298,26 @@ export async function startStdioServer() {
   
   console.error('✅ Reddit MCP Buddy Server running (stdio mode)');
   console.error('💡 Reading from stdin, writing to stdout');
-  
-  // Cleanup on exit
-  process.on('SIGINT', () => {
-    cacheManager.destroy();
-    process.exit(0);
-  });
-  
-  process.on('SIGTERM', () => {
-    cacheManager.destroy();
-    process.exit(0);
-  });
+
+  // Cleanup on exit with proper signal handler management
+  let isExiting = false;
+
+  const cleanup = () => {
+    if (isExiting) return; // Prevent multiple cleanup calls
+    isExiting = true;
+
+    try {
+      // Cleanup in proper order
+      cacheManager.destroy();
+      process.exit(0);
+    } catch (error) {
+      console.error('Error during cleanup:', error);
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
 }
 
 /**
@@ -323,6 +411,54 @@ export async function startHttpServer(port: number = 3000) {
     res.end('Not Found\n');
   });
   
+  // Cleanup on exit with proper signal handler management
+  let isExiting = false;
+
+  const cleanup = () => {
+    if (isExiting) return; // Prevent multiple cleanup calls
+    isExiting = true;
+
+    try {
+      // Close HTTP server first (proper cleanup order)
+      httpServer.close(() => {
+        // Then destroy cache
+        cacheManager.destroy();
+        process.exit(0);
+      });
+
+      // Timeout: if close doesn't complete in 10 seconds, force exit
+      const forceExitTimeout = setTimeout(() => {
+        console.error('⚠️ Server close timeout, forcing exit');
+        cacheManager.destroy();
+        process.exit(1);
+      }, 10000);
+
+      // Clear timeout if close completes
+      httpServer.on('close', () => clearTimeout(forceExitTimeout));
+    } catch (error) {
+      console.error('Error during cleanup:', error);
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+
+  // Handle server errors
+  httpServer.on('error', (error: any) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`❌ Port ${port} is already in use`);
+      console.error(`Try a different port: REDDIT_BUDDY_PORT=${port + 1} npm start`);
+      console.error(`Or kill the process using port ${port}: lsof -ti:${port} | xargs kill -9`);
+    } else if (error.code === 'EACCES') {
+      console.error(`❌ Permission denied. Port ${port} requires elevated privileges`);
+      console.error(`Try a higher port number (>1024): REDDIT_BUDDY_PORT=3001 npm start`);
+    } else {
+      console.error(`❌ Server error: ${error.message}`);
+    }
+    process.exit(1);
+  });
+
   // Start listening
   httpServer.listen(port, () => {
     console.error(`✅ Reddit MCP Buddy Server running (Streamable HTTP)`);
@@ -331,14 +467,4 @@ export async function startHttpServer(port: number = 3000) {
     console.error(`🔌 Connect with Postman MCP client`);
     console.error('💡 Tip: Run "reddit-mcp-buddy --auth" for 10x more requests\n');
   });
-  
-  // Cleanup on exit
-  const cleanup = () => {
-    cacheManager.destroy();
-    httpServer.close();
-    process.exit(0);
-  };
-  
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
 }

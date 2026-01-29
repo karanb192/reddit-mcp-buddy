@@ -132,8 +132,14 @@ export class CompoundRateLimiter {
 
   /**
    * Check if request can be made across all limiters
+   * If no limiters configured, allows unlimited requests
    */
   canMakeRequest(): boolean {
+    // If no limiters are configured, allow requests (empty state)
+    if (this.limiters.size === 0) {
+      return true;
+    }
+
     for (const limiter of this.limiters.values()) {
       if (!limiter.canMakeRequest()) {
         return false;
@@ -146,21 +152,37 @@ export class CompoundRateLimiter {
    * Record request across all limiters
    */
   recordRequest(): void {
+    // Only record if limiters are configured
+    if (this.limiters.size === 0) {
+      return;
+    }
+
+    // Record on the first limiter that fails to record (to raise the proper error)
     for (const limiter of this.limiters.values()) {
-      limiter.recordRequest();
+      try {
+        limiter.recordRequest();
+      } catch (error) {
+        // Re-throw the first limiter's error with better context
+        throw new Error(`Compound rate limit exceeded: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
   /**
    * Get the most restrictive time until next request
+   * Returns 0 if no limiters are configured
    */
   timeUntilNextRequest(): number {
+    if (this.limiters.size === 0) {
+      return 0;
+    }
+
     let maxTime = 0;
-    
+
     for (const limiter of this.limiters.values()) {
       maxTime = Math.max(maxTime, limiter.timeUntilNextRequest());
     }
-    
+
     return maxTime;
   }
 

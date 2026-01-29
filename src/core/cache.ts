@@ -7,6 +7,7 @@ interface CacheEntry<T> {
   timestamp: number;
   size: number;
   hits: number;
+  expiresAt: number; // When this entry expires (milliseconds since epoch)
 }
 
 interface CacheOptions {
@@ -26,19 +27,19 @@ export class CacheManager {
   constructor(options: CacheOptions = {}) {
     this.maxSize = options.maxSize ?? 50 * 1024 * 1024; // 50MB default
     this.defaultTTL = options.defaultTTL ?? 5 * 60 * 1000; // 5 minutes default
-    
+
     // Adaptive TTL based on content type
     this.ttlByPattern = new Map([
       [/^subreddit:.*:hot$/, 5 * 60 * 1000],    // Hot posts: 5 minutes
-      [/^subreddit:.*:new$/, 2 * 60 * 1000],    // New posts: 2 minutes  
+      [/^subreddit:.*:new$/, 2 * 60 * 1000],    // New posts: 2 minutes
       [/^subreddit:.*:top$/, 30 * 60 * 1000],   // Top posts: 30 minutes
       [/^post:/, 10 * 60 * 1000],               // Individual posts: 10 minutes
       [/^user:/, 15 * 60 * 1000],               // User data: 15 minutes
       [/^search:/, 10 * 60 * 1000],             // Search results: 10 minutes
     ]);
 
-    // Start cleanup interval
-    if (options.cleanupInterval !== 0) {
+    // Only start cleanup if cache is enabled (maxSize > 0)
+    if (this.maxSize > 0 && options.cleanupInterval !== 0) {
       this.startCleanup(options.cleanupInterval ?? 60000); // Every minute
     }
   }
@@ -48,30 +49,29 @@ export class CacheManager {
    */
   get<T>(key: string): T | null {
     const entry = this.cache.get(key);
-    
+
     if (!entry) {
       return null;
     }
 
-    // Check if expired
-    const ttl = this.getTTLForKey(key);
-    if (Date.now() - entry.timestamp > ttl) {
+    // Check if expired using expiresAt field
+    if (Date.now() >= entry.expiresAt) {
       this.delete(key);
       return null;
     }
 
     // Update hit count for LRU tracking
     entry.hits++;
-    
+
     return entry.data as T;
   }
 
   /**
    * Set item in cache with automatic size management
    */
-  set<T>(key: string, data: T, _customTTL?: number): void {
+  set<T>(key: string, data: T, customTTL?: number): void {
     const size = this.estimateSize(data);
-    
+
     // Evict entries if needed to make room
     while (this.sizeUsed + size > this.maxSize && this.cache.size > 0) {
       this.evictLRU();
@@ -82,16 +82,50 @@ export class CacheManager {
       this.delete(key);
     }
 
+    // Determine TTL: custom > pattern-based > default
+    let ttl = this.defaultTTL;
+    if (customTTL !== undefined && customTTL > 0) {
+      ttl = customTTL;
+    } else {
+      // Check if key matches any pattern
+      for (const [pattern, patternTTL] of this.ttlByPattern.entries()) {
+        if (pattern.test(key)) {
+          ttl = patternTTL;
+          break;
+        }
+      }
+    }
+
     // Add new entry
+    const now = Date.now();
     const entry: CacheEntry<T> = {
       data,
-      timestamp: Date.now(),
+      timestamp: now,
+      expiresAt: now + ttl,
       size,
       hits: 0
     };
 
     this.cache.set(key, entry);
     this.sizeUsed += size;
+  }
+
+  /**
+   * Check if key exists in cache and is not expired
+   */
+  has(key: string): boolean {
+    const entry = this.cache.get(key);
+    if (!entry) {
+      return false;
+    }
+
+    // Check if expired
+    if (Date.now() >= entry.expiresAt) {
+      this.delete(key);
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -133,25 +167,39 @@ export class CacheManager {
   }
 
   /**
-   * Generate cache key
+   * Generate cache key with validation
+   * Ensures cache keys are unique, properly formatted, and don't contain invalid characters
    */
   static createKey(...parts: (string | number | boolean | undefined)[]): string {
-    return parts
-      .filter(p => p !== undefined && p !== null)
-      .join(':')
-      .toLowerCase();
-  }
+    // Filter out undefined/null values
+    const validParts = parts.filter(p => p !== undefined && p !== null);
 
-  /**
-   * Private: Get TTL for a specific key based on patterns
-   */
-  private getTTLForKey(key: string): number {
-    for (const [pattern, ttl] of this.ttlByPattern) {
-      if (pattern.test(key)) {
-        return ttl;
-      }
+    if (validParts.length === 0) {
+      throw new Error('Cache key must have at least one part');
     }
-    return this.defaultTTL;
+
+    // Convert all parts to strings and validate
+    const stringParts = validParts.map((p) => {
+      const str = String(p).toLowerCase().trim();
+      if (str.length === 0) {
+        throw new Error('Cache key parts cannot be empty strings');
+      }
+      // Validate characters (alphanumeric, underscore, hyphen only)
+      if (!/^[a-z0-9_-]+$/.test(str)) {
+        throw new Error(`Invalid cache key part: "${str}" contains invalid characters`);
+      }
+      return str;
+    });
+
+    // Join with colons and validate final key
+    const key = stringParts.join(':');
+
+    // Sanity check: key shouldn't be too long (prevents accidental misuse)
+    if (key.length > 256) {
+      throw new Error(`Cache key too long: ${key.length} > 256 characters`);
+    }
+
+    return key;
   }
 
   /**
@@ -174,9 +222,10 @@ export class CacheManager {
 
     for (const [key, entry] of this.cache.entries()) {
       // Score based on hits and age
-      const age = Date.now() - entry.timestamp;
+      // Prevent division by zero when age is 0 (newly added entry)
+      const age = Math.max(1, Date.now() - entry.timestamp); // At least 1ms
       const score = entry.hits / (age / 1000); // Hits per second
-      
+
       if (score < minScore) {
         minScore = score;
         lruKey = key;
@@ -196,8 +245,8 @@ export class CacheManager {
     const keysToDelete: string[] = [];
 
     for (const [key, entry] of this.cache.entries()) {
-      const ttl = this.getTTLForKey(key);
-      if (now - entry.timestamp > ttl) {
+      // Use expiresAt field for cleanup
+      if (now >= entry.expiresAt) {
         keysToDelete.push(key);
       }
     }
@@ -207,9 +256,24 @@ export class CacheManager {
 
   /**
    * Private: Start cleanup timer
+   * Uses unref() to prevent the timer from keeping the process alive
    */
   private startCleanup(interval: number): void {
     this.cleanupTimer = setInterval(() => this.cleanup(), interval);
+    // Mark timer as non-blocking so it doesn't prevent process exit
+    if (this.cleanupTimer && typeof this.cleanupTimer.unref === 'function') {
+      this.cleanupTimer.unref();
+    }
+  }
+
+  /**
+   * Private: Stop cleanup timer
+   */
+  private stopCleanup(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
   }
 
   /**
@@ -243,10 +307,7 @@ export class CacheManager {
    * Cleanup on destroy
    */
   destroy(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
+    this.stopCleanup();
     this.clear();
   }
 }

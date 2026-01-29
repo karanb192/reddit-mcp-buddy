@@ -5,6 +5,7 @@
 import { homedir, platform } from 'os';
 import { join } from 'path';
 import { promises as fs } from 'fs';
+import { z } from 'zod';
 
 export interface AuthConfig {
   clientId: string;
@@ -18,9 +19,21 @@ export interface AuthConfig {
   userAgent?: string;
 }
 
+// Zod schema for OAuth token response validation
+const OAuthTokenResponseSchema = z.object({
+  access_token: z.string().min(1, 'access_token must not be empty'),
+  token_type: z.string().min(1, 'token_type must not be empty'),
+  expires_in: z.number().positive('expires_in must be positive'),
+  scope: z.string(),
+}).strict().passthrough(); // Strict mode + passthrough for extra fields
+
 export class AuthManager {
   private config: AuthConfig | null = null;
   private configPath: string;
+  // Lock for token refresh to prevent concurrent refresh attempts (race conditions)
+  private tokenRefreshPromise: Promise<void> | null = null;
+  // Token expiration buffer (refresh 10 seconds before actual expiration to handle clock drift)
+  private readonly TOKEN_EXPIRATION_BUFFER_MS = 10000;
 
   constructor() {
     this.configPath = this.getConfigPath();
@@ -94,11 +107,40 @@ export class AuthManager {
 
     // Treat unresolved template strings as undefined
     // (happens when Claude Desktop doesn't have the config value set)
-    if (trimmed.startsWith('${') && trimmed.endsWith('}')) {
+    // Handles various template patterns:
+    // - ${VAR} - standard template
+    // - ${VAR:-default} - template with default
+    // - ${${VAR}} - nested template
+    // - ${ or } alone - partial/malformed templates
+    // - ${VAR}${VAR2} - multiple templates
+    if (this.containsUnresolvedTemplate(trimmed)) {
       return undefined;
     }
 
     return trimmed;
+  }
+
+  /**
+   * Check if a string contains unresolved template patterns
+   */
+  private containsUnresolvedTemplate(value: string): boolean {
+    // Check for any ${...} pattern (including nested, with defaults, etc.)
+    if (/\$\{[^}]*\}/.test(value)) {
+      return true;
+    }
+
+    // Check for unclosed template start: ${ without matching }
+    if (value.includes('${') && !value.includes('}')) {
+      return true;
+    }
+
+    // Check for orphaned template syntax that looks like unresolved vars
+    // e.g., "$REDDIT_CLIENT_ID" without braces (common in some configs)
+    if (/\$[A-Z_][A-Z0-9_]*/.test(value)) {
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -108,7 +150,7 @@ export class AuthManager {
     try {
       // Ensure directory exists
       await fs.mkdir(this.configPath, { recursive: true });
-      
+
       // Save config
       const configFile = join(this.configPath, 'auth.json');
       await fs.writeFile(
@@ -116,7 +158,20 @@ export class AuthManager {
         JSON.stringify(config, null, 2),
         { mode: 0o600 } // Read/write for owner only
       );
-      
+
+      // Verify file permissions were actually applied (security check)
+      const stats = await fs.stat(configFile);
+      const mode = stats.mode & parseInt('777', 8); // Extract permission bits
+      if (mode !== 0o600) {
+        console.error(`Warning: Auth file permissions are ${mode.toString(8)}, expected 600`);
+        // On some systems, chmod after write may be needed
+        try {
+          await fs.chmod(configFile, 0o600);
+        } catch (chmodError) {
+          throw new Error(`Failed to set auth file permissions to 0o600: ${chmodError}`);
+        }
+      }
+
       this.config = config;
     } catch (error) {
       throw new Error(`Failed to save auth configuration: ${error}`);
@@ -140,11 +195,18 @@ export class AuthManager {
   }
 
   /**
-   * Check if token is expired
+   * Check if token is expired or will expire soon (including buffer for clock drift)
+   * Returns true if:
+   * - No expiresAt set
+   * - Current time >= expiresAt
+   * - Current time >= expiresAt - buffer (to handle clock drift and refresh early)
    */
   isTokenExpired(): boolean {
-    if (!this.config?.expiresAt) return true;
-    return Date.now() >= this.config.expiresAt;
+    if (!this.config?.expiresAt || this.config.expiresAt <= 0) return true;
+    // Consider token expired if we're within the buffer time before actual expiration
+    // This prevents using an expired token due to clock drift between client and server
+    const expirationThreshold = this.config.expiresAt - this.TOKEN_EXPIRATION_BUFFER_MS;
+    return Date.now() >= expirationThreshold;
   }
 
   /**
@@ -152,19 +214,47 @@ export class AuthManager {
    */
   async getAccessToken(): Promise<string | null> {
     if (!this.config) return null;
-    
+
     // For script apps, we can use app-only auth
     if (!this.config.accessToken || this.isTokenExpired()) {
-      await this.refreshAccessToken();
+      // Wait for any in-flight refresh to complete, or start a new one
+      if (this.tokenRefreshPromise) {
+        await this.tokenRefreshPromise;
+      } else {
+        await this.refreshAccessToken();
+      }
     }
-    
+
     return this.config.accessToken || null;
   }
 
   /**
    * Refresh access token using client credentials
+   * Uses a lock to prevent concurrent refresh attempts (race conditions)
    */
   async refreshAccessToken(): Promise<void> {
+    // If a refresh is already in progress, wait for it to complete
+    if (this.tokenRefreshPromise) {
+      await this.tokenRefreshPromise;
+      return;
+    }
+
+    // Create a promise for this refresh and store it
+    const refreshPromise = this.doRefreshAccessToken();
+    this.tokenRefreshPromise = refreshPromise;
+
+    try {
+      await refreshPromise;
+    } finally {
+      // Clear the promise when done (success or error)
+      this.tokenRefreshPromise = null;
+    }
+  }
+
+  /**
+   * Internal implementation of token refresh (protected by lock)
+   */
+  private async doRefreshAccessToken(): Promise<void> {
     if (!this.config?.clientId || !this.config?.clientSecret) {
       throw new Error('No client credentials configured');
     }
@@ -204,16 +294,43 @@ export class AuthManager {
         throw new Error(`Failed to get access token: ${response.status} - ${error}`);
       }
 
-      const data = await response.json() as {
-        access_token: string;
-        token_type: string;
-        expires_in: number;
-        scope: string;
-      };
+      const rawData = await response.json();
+
+      // Validate token response structure
+      let data;
+      try {
+        data = OAuthTokenResponseSchema.parse(rawData);
+      } catch (validationError) {
+        if (validationError instanceof z.ZodError) {
+          const issues = validationError.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+          throw new Error(`Invalid OAuth token response format: ${issues}`);
+        }
+        throw new Error('Failed to validate OAuth token response');
+      }
+
+      // Validate token format (basic JWT-like check)
+      const tokenParts = data.access_token.split('.');
+      if (tokenParts.length < 1 || data.access_token.length < 10) {
+        throw new Error('Invalid access token format received from Reddit');
+      }
+
+      // Validate token expiration time (boundary check)
+      const MAX_TOKEN_LIFETIME_SECONDS = 365 * 24 * 60 * 60; // 1 year max
+      if (data.expires_in <= 0 || data.expires_in > MAX_TOKEN_LIFETIME_SECONDS) {
+        throw new Error(`Invalid token expiration time: ${data.expires_in}s is unreasonable`);
+      }
+
+      // Calculate expiration time
+      const expiresAt = Date.now() + (data.expires_in * 1000);
+
+      // Sanity check: expiration time should be in the future
+      if (expiresAt <= Date.now()) {
+        throw new Error('Token expiration time is in the past');
+      }
 
       // Update config
       this.config.accessToken = data.access_token;
-      this.config.expiresAt = Date.now() + (data.expires_in * 1000);
+      this.config.expiresAt = expiresAt;
       this.config.scope = data.scope;
 
       // Never save password to disk

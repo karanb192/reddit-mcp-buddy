@@ -27,6 +27,12 @@ export class RedditAPI {
   private timeout: number;
   private baseUrl = 'https://www.reddit.com';
   private oauthUrl = 'https://oauth.reddit.com';
+  // Request deduplication: Map of in-flight requests keyed by endpoint
+  private inFlightRequests: Map<string, Promise<any>> = new Map();
+  // Exponential backoff configuration
+  private readonly MAX_BACKOFF_MS = 30000; // 30 second max backoff
+  private readonly INITIAL_BACKOFF_MS = 100;
+  private readonly BACKOFF_MULTIPLIER = 2;
 
   constructor(options: RedditAPIOptions) {
     this.auth = options.authManager;
@@ -324,9 +330,77 @@ export class RedditAPI {
   }
 
   /**
-   * Private: Make GET request to Reddit API with retry logic
+   * Private: Calculate exponential backoff with jitter
+   */
+  private calculateBackoff(retriesLeft: number): number {
+    const maxRetries = 2;
+    const retriesUsed = maxRetries - retriesLeft;
+
+    // Exponential backoff: INITIAL * MULTIPLIER^retriesUsed
+    const baseBackoff = this.INITIAL_BACKOFF_MS * Math.pow(this.BACKOFF_MULTIPLIER, retriesUsed);
+
+    // Cap at max backoff
+    const cappedBackoff = Math.min(baseBackoff, this.MAX_BACKOFF_MS);
+
+    // Add jitter (±20% of backoff) to prevent thundering herd
+    const jitter = cappedBackoff * 0.2 * (Math.random() * 2 - 1);
+    const backoff = Math.max(0, cappedBackoff + jitter);
+
+    return Math.round(backoff);
+  }
+
+  /**
+   * Private: Extract retry-after delay from response headers
+   */
+  private getRetryAfterDelay(response: Response): number | null {
+    const retryAfter = response.headers.get('retry-after');
+    if (!retryAfter) return null;
+
+    // Retry-After can be seconds or HTTP date
+    const seconds = parseInt(retryAfter, 10);
+    if (!isNaN(seconds)) {
+      // It's seconds
+      return Math.min(seconds * 1000, this.MAX_BACKOFF_MS);
+    }
+
+    // Try parsing as HTTP date
+    try {
+      const retryDate = new Date(retryAfter);
+      const delay = retryDate.getTime() - Date.now();
+      return Math.max(0, Math.min(delay, this.MAX_BACKOFF_MS));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Private: Make GET request to Reddit API with retry logic and deduplication
    */
   private async get<T>(endpoint: string, retries: number = 2): Promise<T> {
+    // Check for in-flight request (deduplication)
+    const inFlightRequest = this.inFlightRequests.get(endpoint);
+    if (inFlightRequest) {
+      return inFlightRequest as Promise<T>;
+    }
+
+    // Create promise for this request
+    const requestPromise = this.getImpl<T>(endpoint, retries);
+
+    // Track the in-flight request
+    this.inFlightRequests.set(endpoint, requestPromise);
+
+    // Clean up when done (success or error)
+    requestPromise.finally(() => {
+      this.inFlightRequests.delete(endpoint);
+    });
+
+    return requestPromise;
+  }
+
+  /**
+   * Private: Implementation of GET request with retry logic
+   */
+  private async getImpl<T>(endpoint: string, retries: number = 2): Promise<T> {
     // Check rate limit
     if (!this.rateLimiter.canMakeRequest()) {
       const isAuth = this.auth.isAuthenticated();
@@ -362,7 +436,7 @@ export class RedditAPI {
           await this.auth.refreshAccessToken();
           headers = await this.auth.getHeaders();
           // Retry with new token
-          return this.get<T>(endpoint, retries - 1);
+          return this.getImpl<T>(endpoint, retries - 1);
         } catch (refreshError) {
           throw new Error('Authentication failed. Please run: reddit-mcp-buddy --auth');
         }
@@ -370,6 +444,16 @@ export class RedditAPI {
 
       // Handle errors
       if (!response.ok) {
+        // Retry on transient errors (503, 429)
+        if ((response.status === 503 || response.status === 429) && retries > 0) {
+          // Service unavailable or too many requests - exponential backoff with jitter
+          // Check for Retry-After header first (respects server's backoff request)
+          const retryAfterDelay = this.getRetryAfterDelay(response);
+          const backoffMs = retryAfterDelay ?? this.calculateBackoff(retries);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          return this.getImpl<T>(endpoint, retries - 1);
+        }
+
         if (response.status === 404) {
           // Extract subreddit name from URL if possible
           const subredditMatch = endpoint.match(/\/r\/([^\/]+)/);
@@ -406,9 +490,14 @@ export class RedditAPI {
 
       // Try to parse JSON
       const contentType = response.headers.get('content-type');
-      
-      if (contentType && contentType.includes('text/html')) {
-        throw new Error('Reddit returned HTML instead of JSON - the subreddit may be inaccessible or there may be a Reddit issue');
+
+      // Check for HTML responses (handles case variations and charset parameters)
+      // Examples: "text/html", "TEXT/HTML", "text/html; charset=utf-8", "application/xhtml+xml"
+      if (contentType) {
+        const normalizedType = contentType.toLowerCase().split(';')[0].trim();
+        if (normalizedType === 'text/html' || normalizedType === 'application/xhtml+xml') {
+          throw new Error('Reddit returned HTML instead of JSON - the subreddit may be inaccessible or there may be a Reddit issue');
+        }
       }
       
       const data = await response.json();
@@ -421,10 +510,22 @@ export class RedditAPI {
       console.error('Reddit API Error:', error.message || error);
 
       if (error.name === 'AbortError') {
+        // Retry on timeout if retries available
+        if (retries > 0) {
+          const backoffMs = this.calculateBackoff(retries);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          return this.getImpl<T>(endpoint, retries - 1);
+        }
         throw new Error('Request timeout (10s exceeded) - Reddit may be slow or unreachable. Try again or check if Reddit is blocked on your network.');
       }
 
-      // Common network errors
+      // Common network errors - retry transient ones
+      if (error.code === 'ECONNRESET' && retries > 0) {
+        const backoffMs = this.calculateBackoff(retries);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+        return this.getImpl<T>(endpoint, retries - 1);
+      }
+
       if (error.code === 'ENOTFOUND') {
         throw new Error('Cannot resolve Reddit domain - check DNS settings or if Reddit is blocked by your ISP/firewall');
       }
@@ -433,7 +534,13 @@ export class RedditAPI {
         throw new Error('Connection refused - Reddit may be blocked by firewall or network policy');
       }
 
-      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+      if (error.code === 'ETIMEDOUT') {
+        // Retry on connection timeout with exponential backoff
+        if (retries > 0) {
+          const backoffMs = this.calculateBackoff(retries);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          return this.getImpl<T>(endpoint, retries - 1);
+        }
         throw new Error('Connection timeout - Reddit may be blocked or network is unstable');
       }
 
