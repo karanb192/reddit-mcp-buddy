@@ -156,12 +156,6 @@ async function setupAuth() {
       });
     }
 
-    // Validate password if provided
-    if (password && password.length < 1) {
-      console.error('\n❌ Password cannot be empty');
-      process.exit(1);
-    }
-
     // Test the credentials
     console.log('\n🔄 Testing authentication...');
 

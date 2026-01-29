@@ -29,6 +29,10 @@ export class RedditAPI {
   private oauthUrl = 'https://oauth.reddit.com';
   // Request deduplication: Map of in-flight requests keyed by endpoint
   private inFlightRequests: Map<string, Promise<any>> = new Map();
+  // Track request start times for cleanup of stale in-flight requests
+  private inFlightRequestTimestamps: Map<string, number> = new Map();
+  // Max time to keep in-flight request tracked (5 minutes - longer than any normal request)
+  private readonly IN_FLIGHT_REQUEST_TTL_MS = 5 * 60 * 1000;
   // Exponential backoff configuration
   private readonly MAX_BACKOFF_MS = 30000; // 30 second max backoff
   private readonly INITIAL_BACKOFF_MS = 100;
@@ -127,8 +131,19 @@ export class RedditAPI {
         throw new Error('Invalid post URL format');
       }
     } else if (postId.includes('_')) {
-      // Format: subreddit_postid
+      // Format: subreddit_postid (or _postid for short URLs like redd.it)
       [subreddit, id] = postId.split('_');
+
+      // Handle short URLs (redd.it) where subreddit is empty - fall through to lookup
+      if (!subreddit) {
+        const infoData = await this.get<RedditListing<RedditPost>>(
+          `/api/info.json?id=t3_${id}`
+        );
+        if (!infoData.data.children.length) {
+          throw new Error(`Post with ID ${id} not found`);
+        }
+        subreddit = infoData.data.children[0].data.subreddit;
+      }
     } else {
       // Just the ID, need to fetch subreddit via /api/info
       id = postId;
@@ -374,9 +389,25 @@ export class RedditAPI {
   }
 
   /**
+   * Private: Clean up stale in-flight requests to prevent memory leaks
+   */
+  private cleanupStaleInFlightRequests(): void {
+    const now = Date.now();
+    for (const [endpoint, timestamp] of this.inFlightRequestTimestamps.entries()) {
+      if (now - timestamp > this.IN_FLIGHT_REQUEST_TTL_MS) {
+        this.inFlightRequests.delete(endpoint);
+        this.inFlightRequestTimestamps.delete(endpoint);
+      }
+    }
+  }
+
+  /**
    * Private: Make GET request to Reddit API with retry logic and deduplication
    */
   private async get<T>(endpoint: string, retries: number = 2): Promise<T> {
+    // Clean up stale requests periodically to prevent memory leaks
+    this.cleanupStaleInFlightRequests();
+
     // Check for in-flight request (deduplication)
     const inFlightRequest = this.inFlightRequests.get(endpoint);
     if (inFlightRequest) {
@@ -386,12 +417,14 @@ export class RedditAPI {
     // Create promise for this request
     const requestPromise = this.getImpl<T>(endpoint, retries);
 
-    // Track the in-flight request
+    // Track the in-flight request with timestamp
     this.inFlightRequests.set(endpoint, requestPromise);
+    this.inFlightRequestTimestamps.set(endpoint, Date.now());
 
     // Clean up when done (success or error)
     requestPromise.finally(() => {
       this.inFlightRequests.delete(endpoint);
+      this.inFlightRequestTimestamps.delete(endpoint);
     });
 
     return requestPromise;

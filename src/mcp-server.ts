@@ -380,10 +380,44 @@ export async function startHttpServer(port: number = 3000) {
       // Parse body for POST requests
       if (req.method === 'POST') {
         let body = '';
+        const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
+        const DATA_TIMEOUT_MS = 30000; // 30 second timeout for receiving data
+
+        // Set timeout for data event to prevent hanging
+        const dataTimeoutId = setTimeout(() => {
+          res.writeHead(408, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: 'Request timeout: no data received within 30 seconds'
+            },
+            id: null
+          }));
+          req.destroy();
+        }, DATA_TIMEOUT_MS);
+
         req.on('data', chunk => {
+          // Check size limit before appending
+          if (body.length + chunk.length > MAX_BODY_SIZE) {
+            clearTimeout(dataTimeoutId);
+            res.writeHead(413, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: 'Payload too large (max 10MB)'
+              },
+              id: null
+            }));
+            req.destroy();
+            return;
+          }
           body += chunk.toString();
         });
+
         req.on('end', async () => {
+          clearTimeout(dataTimeoutId);
           try {
             const parsedBody = JSON.parse(body);
             await transport.handleRequest(req, res, parsedBody);
@@ -398,6 +432,10 @@ export async function startHttpServer(port: number = 3000) {
               id: null
             }));
           }
+        });
+
+        req.on('error', () => {
+          clearTimeout(dataTimeoutId);
         });
       } else {
         // GET or DELETE requests
