@@ -4,6 +4,7 @@
  */
 
 import { startStdioServer, startHttpServer } from './mcp-server.js';
+import { setupProxyFromEnv } from './core/proxy.js';
 
 // Determine transport mode from environment
 const isHttpMode = process.env.REDDIT_BUDDY_HTTP === 'true';
@@ -23,6 +24,7 @@ process.on('uncaughtException', (error) => {
 // Start the appropriate server
 async function main() {
   try {
+    setupProxyFromEnv();
     if (isHttpMode) {
       await startHttpServer(port);
     } else {

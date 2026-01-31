@@ -279,6 +279,32 @@ npx -y reddit-mcp-buddy --http
 REDDIT_BUDDY_PORT=8080 npx -y reddit-mcp-buddy --http
 ```
 
+### Proxy (Optional)
+
+If Reddit is blocked on your server/cloud IP (common in datacenters), you can route outbound requests via a proxy.
+
+- **HTTPS proxy**: set `HTTPS_PROXY` and `HTTP_PROXY` (and optionally `NO_PROXY`)
+- **SOCKS5 proxy**: set `ALL_PROXY` (prefer `socks5h://` to proxy DNS as well) and optionally `NO_PROXY`
+
+Examples:
+
+```bash
+# HTTPS proxy
+export HTTPS_PROXY="http://user:pass@proxy-host:proxy-port"
+export HTTP_PROXY="http://user:pass@proxy-host:proxy-port"
+export NO_PROXY="localhost,127.0.0.1"
+
+REDDIT_BUDDY_HTTP=true node dist/index.js
+```
+
+```bash
+# SOCKS5 proxy (DNS via proxy)
+export ALL_PROXY="socks5h://user:pass@proxy-host:proxy-port"
+export NO_PROXY="localhost,127.0.0.1"
+
+REDDIT_BUDDY_HTTP=true node dist/index.js
+```
+
 **Note:** The server runs in stdio mode by default (for Claude Desktop). Use `--http` flag for testing with Postman MCP or direct API calls.
 
 ### Global Install
