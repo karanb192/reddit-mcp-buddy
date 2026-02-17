@@ -33,7 +33,7 @@ jobs:
         run: npm run build
 
       - name: Run unit tests
-        run: bash tests/test-unit.sh
+        run: npm test
 
       - name: Build Desktop Extension (.mcpb)
         run: |
