@@ -29,11 +29,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test || echo "No tests found, skipping"
-
       - name: Build package
         run: npm run build
+
+      - name: Run unit tests
+        run: bash tests/test-unit.sh
 
       - name: Build Desktop Extension (.mcpb)
         run: |

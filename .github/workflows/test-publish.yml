@@ -25,11 +25,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test || echo "No tests found, skipping"
-
       - name: Build package
         run: npm run build
+
+      - name: Run unit tests
+        run: bash tests/test-unit.sh
+
+      - name: Run integration tests
+        run: bash tests/test-integration.sh
+        continue-on-error: true
 
       - name: Validate package.json
         run: |
@@ -150,6 +154,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Dependencies installed" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Build successful" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Unit tests passed (blocking)" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚠️ Integration tests (non-blocking, rate limited)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ package.json validated" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ server.json validated" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ NPM publish (dry run) successful" >> $GITHUB_STEP_SUMMARY
