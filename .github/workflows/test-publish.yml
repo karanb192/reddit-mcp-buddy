@@ -142,6 +142,21 @@ jobs:
             exit 1
           fi
 
+      - name: Build Desktop Extension (.mcpb)
+        run: |
+          chmod +x scripts/build-mcpb.sh
+          ./scripts/build-mcpb.sh
+
+      - name: Verify .mcpb file was created
+        run: |
+          if [ ! -f "reddit-mcp-buddy.mcpb" ]; then
+            echo "Error: reddit-mcp-buddy.mcpb not found!"
+            exit 1
+          fi
+          ls -lh reddit-mcp-buddy.mcpb
+          echo "✅ Desktop extension build verified"
+          rm reddit-mcp-buddy.mcpb
+
       - name: Summary
         run: |
           echo "## 📋 Publishing Test Summary" >> $GITHUB_STEP_SUMMARY
@@ -155,6 +170,7 @@ jobs:
           echo "- ✅ NPM publish (dry run) successful" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ MCP Publisher CLI installed" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Build artifacts validated" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Desktop extension (.mcpb) built" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📝 Next Steps" >> $GITHUB_STEP_SUMMARY
           echo "1. Add NPM_TOKEN to GitHub Secrets" >> $GITHUB_STEP_SUMMARY
