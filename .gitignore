@@ -48,8 +48,10 @@ local-files/
 .claude/
 CLAUDE.md
 
-# Test scripts and files (local testing only)
-test*
+# Test scripts and files (local testing only — keep tests/ directory tracked)
+/test-*.sh
+/test-*.js
+/test-*.py
 
 # MCP registry auth tokens
 .mcpregistry_*

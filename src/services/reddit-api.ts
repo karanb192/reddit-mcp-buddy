@@ -422,10 +422,12 @@ export class RedditAPI {
     this.inFlightRequestTimestamps.set(endpoint, Date.now());
 
     // Clean up when done (success or error)
+    // The .catch(() => {}) prevents unhandled rejection warnings on the floating
+    // .finally() chain — the caller handles the actual rejection via the returned promise.
     requestPromise.finally(() => {
       this.inFlightRequests.delete(endpoint);
       this.inFlightRequestTimestamps.delete(endpoint);
-    });
+    }).catch(() => {});
 
     return requestPromise;
   }

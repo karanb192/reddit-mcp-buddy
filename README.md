@@ -476,6 +476,11 @@ npm run dev
 # Build
 npm run build
 
+# Run tests
+npm test                     # Unit tests
+npm run test:integration     # Integration tests
+npm run test:all             # All tests
+
 # Test rate limits
 npm run test:rate-limit       # Test with current environment
 npm run test:rate-limit:anon  # Test anonymous mode (10 rpm)

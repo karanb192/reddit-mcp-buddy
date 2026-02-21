@@ -40,7 +40,11 @@ const port = parsePort(process.env.REDDIT_BUDDY_PORT);
 // Handle unhandled errors
 process.on('unhandledRejection', (error) => {
   console.error('Unhandled rejection:', error);
-  process.exit(1);
+  // In HTTP mode, don't crash the server for a single request failure.
+  // In stdio mode, exit since the connection is 1:1 with the client.
+  if (!isHttpMode) {
+    process.exit(1);
+  }
 });
 
 process.on('uncaughtException', (error) => {

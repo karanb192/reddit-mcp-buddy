@@ -2,7 +2,7 @@
  * Reddit authentication manager
  */
 
-import { homedir, platform } from 'os';
+import { homedir } from 'os';
 import { join } from 'path';
 import { promises as fs } from 'fs';
 import { z } from 'zod';
@@ -420,22 +420,7 @@ export class AuthManager {
    * Private: Get configuration directory path based on OS
    */
   private getConfigPath(): string {
-    const home = homedir();
-    
-    switch (platform()) {
-      case 'win32':
-        return join(
-          process.env.APPDATA || join(home, 'AppData', 'Roaming'),
-          'reddit-mcp-buddy'
-        );
-      case 'darwin':
-        return join(home, 'Library', 'Application Support', 'reddit-mcp-buddy');
-      default: // linux and others
-        return join(
-          process.env.XDG_CONFIG_HOME || join(home, '.config'),
-          'reddit-mcp-buddy'
-        );
-    }
+    return join(homedir(), '.reddit-mcp-buddy');
   }
 
   /**

@@ -307,7 +307,8 @@ if (args.includes('--auth') || args.includes('-a')) {
 } else if (args.includes('--help') || args.includes('-h')) {
   console.log('Reddit MCP Buddy - Your AI assistant\'s best friend for browsing Reddit\n');
   console.log('Usage:');
-  console.log('  reddit-mcp-buddy           Start the MCP server');
+  console.log('  reddit-mcp-buddy           Start the MCP server (stdio mode)');
+  console.log('  reddit-mcp-buddy --http    Start the MCP server (HTTP mode)');
   console.log('  reddit-mcp-buddy --auth    Set up Reddit authentication (optional)');
   console.log('  reddit-mcp-buddy --help    Show this help message\n');
   console.log('Features:');
@@ -320,6 +321,10 @@ if (args.includes('--auth') || args.includes('-a')) {
 } else if (args.includes('--version') || args.includes('-v')) {
   console.log(`Reddit MCP Buddy v${SERVER_VERSION}`);
 } else {
+  // Support --http flag as shorthand for REDDIT_BUDDY_HTTP=true
+  if (args.includes('--http')) {
+    process.env.REDDIT_BUDDY_HTTP = 'true';
+  }
   // Start the server
   startServer().catch((error) => {
     console.error('Failed to start:', error);
