@@ -19,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
@@ -80,18 +80,10 @@ jobs:
       - name: Test NPM publish (dry run)
         run: |
           echo "Testing NPM publish with --dry-run..."
-          if [ -n "$NODE_AUTH_TOKEN" ]; then
-            echo "Using provided NPM token"
-            npm publish --dry-run --access public
-          else
-            echo "No NPM token provided, using npm pack instead"
-            npm pack
-            echo "✅ Package can be built successfully"
-            ls -lh *.tgz
-            rm *.tgz
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm pack
+          echo "✅ Package can be built successfully"
+          ls -lh *.tgz
+          rm *.tgz
 
       - name: Test MCP Publisher installation
         run: |
@@ -173,5 +165,5 @@ jobs:
           echo "- ✅ Desktop extension (.mcpb) built" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📝 Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. Add NPM_TOKEN to GitHub Secrets" >> $GITHUB_STEP_SUMMARY
+          echo "1. Configure npm Trusted Publisher on npmjs.com" >> $GITHUB_STEP_SUMMARY
           echo "2. Create a version tag to trigger actual publishing" >> $GITHUB_STEP_SUMMARY
