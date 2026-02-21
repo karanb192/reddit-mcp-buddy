@@ -151,6 +151,7 @@ assert "CLI --version outputs correct version" "echo '$CLI_VERSION' | grep -q '$
 CLI_HELP=$(node dist/cli.js --help 2>&1)
 assert "CLI --help shows usage info" "echo \"$CLI_HELP\" | grep -q 'reddit-mcp-buddy'"
 assert "CLI --help mentions --auth flag" "echo \"$CLI_HELP\" | grep -q '\\-\\-auth'"
+assert "CLI --help mentions --http flag" "echo \"$CLI_HELP\" | grep -q '\\-\\-http'"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 2: UNIT TESTS (No Network Required)

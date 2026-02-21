@@ -733,9 +733,9 @@ FINAL_HEALTH=$(curl -s "http://localhost:${HTTP_PORT}/health" 2>/dev/null)
 assert_contains "Server still healthy after error tests" "$FINAL_HEALTH" "ok"
 
 # --------------------------------------------------------------------------
-# 5e. HTTP Server Survives Validation Errors (Unhandled Rejection — NEW uncommitted)
+# 5e. HTTP Server Survives Validation Errors (Unhandled Rejection — NEW)
 # --------------------------------------------------------------------------
-log_subsection "5e. HTTP Unhandled Rejection Resilience — NEW (uncommitted)"
+log_subsection "5e. HTTP Unhandled Rejection Resilience — NEW"
 
 # Send a request that triggers validation error inside tool handler
 # This exercises the unhandledRejection → no-crash path in HTTP mode
