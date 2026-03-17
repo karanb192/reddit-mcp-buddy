@@ -12,6 +12,10 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## 🎬 See It In Action
 
+![Reddit MCP Buddy Demo - AirPods Max 2 and Dune Part Three](assets/images/reddit-mcp-buddy-demo-2026.gif)
+
+*Claude checking Reddit's reaction to the Dune Part Three trailer and whether the AirPods Max 2 are worth $549*
+
 ![Reddit MCP Buddy Demo - Analyzing H1B sentiment across subreddits](assets/images/reddit-mcp-buddy.gif)
 
 *Claude analyzing real-time sentiment about H-1B visa changes across r/cscareerquestions and r/india*
