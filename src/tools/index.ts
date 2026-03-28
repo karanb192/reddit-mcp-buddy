@@ -270,10 +270,22 @@ export class RedditTools {
       locked: post.locked,
     };
 
-    // Process comments
-    const comments = commentsListing.data.children
-      .filter(child => child.kind === 't1') // Only comments
-      .map(child => child.data);
+    // Recursively flatten the comment tree, including nested replies
+    const flattenComments = (listing: typeof commentsListing): typeof commentsListing.data.children[0]['data'][] => {
+      const result: typeof commentsListing.data.children[0]['data'][] = [];
+      for (const child of listing.data.children) {
+        if (child.kind !== 't1') continue; // skip 'more' objects
+        const comment = child.data;
+        result.push(comment);
+        if (comment.replies && typeof comment.replies !== 'string' && comment.replies.data?.children?.length) {
+          result.push(...flattenComments(comment.replies as typeof commentsListing));
+        }
+      }
+      return result;
+    };
+
+    // Process comments — full tree, not just top-level
+    const comments = flattenComments(commentsListing);
 
     let result: any = {
       post: cleanPost,
