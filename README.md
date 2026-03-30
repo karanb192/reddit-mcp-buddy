@@ -82,6 +82,10 @@ claude mcp add --transport stdio reddit-mcp-buddy -s user -- npx -y reddit-mcp-b
 
 Use the NPM method: `npx -y reddit-mcp-buddy`
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/karanb192-reddit-mcp-buddy).
+
 ## What can it do?
 
 Ask your AI assistant to:
