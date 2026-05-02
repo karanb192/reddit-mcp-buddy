@@ -50,6 +50,11 @@ const ToolResultResponseSchema = z.object({
 // Type for validated MCP responses
 type ToolResultResponse = z.infer<typeof ToolResultResponseSchema>;
 
+type ToolHandlers = {
+  'tools/list': () => Promise<{ tools: Tool[] }> | { tools: Tool[] };
+  'tools/call': (params: any) => Promise<ToolResultResponse>;
+};
+
 /**
  * Convert Zod schema to MCP-compatible JSON Schema with proper typing
  * Ensures the output is valid for MCP tool definitions
@@ -120,10 +125,52 @@ function createValidatedResponse(text: string, isError: boolean = false): ToolRe
   }
 }
 
-/**
- * Create MCP server with proper protocol implementation
- */
-export async function createMCPServer() {
+function createConfiguredServer(
+  rateLimit: number,
+  cacheTTL: number,
+  handlers: ToolHandlers,
+): Server {
+  // Create MCP server
+  const server = new Server(
+    {
+      name: SERVER_NAME,
+      version: SERVER_VERSION,
+      description: `Reddit content browser and analyzer. Access posts, comments, and user data from Reddit.
+
+KEY CONCEPTS:
+- Subreddits: Communities like "technology", "science". Use without r/ prefix
+- Special subreddits: "all" (entire Reddit), "popular" (trending/default)
+- Sorting: "hot" (trending), "new" (recent), "top" (highest score), "rising" (gaining traction), "controversial" (disputed)
+- Time ranges: For "top" sort - "hour", "day", "week", "month", "year", "all"
+- Post IDs: Short codes like "abc123" from Reddit URLs
+- Usernames: Without u/ prefix (use "spez" not "u/spez")
+
+COMMON QUERIES:
+- "What's trending on Reddit?" → browse_subreddit with subreddit="all" and sort="hot"
+- "Top posts this week in technology" → browse_subreddit with subreddit="technology", sort="top", time="week"
+- "Search for AI discussions" → search_reddit with query="artificial intelligence"
+- "Get comments on a Reddit post" → get_post_details with URL or just post_id
+- "Analyze a Reddit user" → user_analysis with username
+
+Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.`,
+    },
+    {
+      capabilities: {
+        tools: {},
+      },
+    }
+  );
+
+  // Register handlers with the MCP server
+  server.setRequestHandler(ListToolsRequestSchema, handlers['tools/list']);
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    return handlers['tools/call'](request.params);
+  });
+
+  return server;
+}
+
+async function createMCPRuntime() {
   // Initialize core components
   const authManager = new AuthManager();
   await authManager.load();
@@ -163,68 +210,37 @@ export async function createMCPServer() {
   // Create tools instance
   const tools = new RedditTools(redditAPI);
   
-  // Create MCP server
-  const server = new Server(
-    {
-      name: SERVER_NAME,
-      version: SERVER_VERSION,
-      description: `Reddit content browser and analyzer. Access posts, comments, and user data from Reddit.
-
-KEY CONCEPTS:
-- Subreddits: Communities like "technology", "science". Use without r/ prefix
-- Special subreddits: "all" (entire Reddit), "popular" (trending/default)
-- Sorting: "hot" (trending), "new" (recent), "top" (highest score), "rising" (gaining traction), "controversial" (disputed)
-- Time ranges: For "top" sort - "hour", "day", "week", "month", "year", "all"
-- Post IDs: Short codes like "abc123" from Reddit URLs
-- Usernames: Without u/ prefix (use "spez" not "u/spez")
-
-COMMON QUERIES:
-- "What's trending on Reddit?" → browse_subreddit with subreddit="all" and sort="hot"
-- "Top posts this week in technology" → browse_subreddit with subreddit="technology", sort="top", time="week"
-- "Search for AI discussions" → search_reddit with query="artificial intelligence"
-- "Get comments on a Reddit post" → get_post_details with URL or just post_id
-- "Analyze a Reddit user" → user_analysis with username
-
-Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.`,
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
-  
   // Generate tool definitions from Zod schemas with proper type conversion
   const toolDefinitions: Tool[] = [
     {
       name: 'browse_subreddit',
       description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising). Returns post list with content, scores, and metadata.',
       inputSchema: zodSchemaToMCPInputSchema(browseSubredditSchema, 'browse_subreddit'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     },
     {
       name: 'search_reddit',
       description: 'Search for posts across Reddit or specific subreddits. Returns matching posts with content and metadata.',
       inputSchema: zodSchemaToMCPInputSchema(searchRedditSchema, 'search_reddit'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     },
     {
       name: 'get_post_details',
       description: 'Fetch a Reddit post with its comments. Requires EITHER url OR post_id. IMPORTANT: When using post_id alone, an extra API call is made to fetch the subreddit first (2 calls total). For better efficiency, always provide the subreddit parameter when known (1 call total).',
       inputSchema: zodSchemaToMCPInputSchema(getPostDetailsSchema, 'get_post_details'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     },
     {
       name: 'user_analysis',
       description: 'Analyze a Reddit user\'s posting history, karma, and activity patterns. Returns posts, comments, and statistics.',
       inputSchema: zodSchemaToMCPInputSchema(userAnalysisSchema, 'user_analysis'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     },
     {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
       inputSchema: zodSchemaToMCPInputSchema(redditExplainSchema, 'reddit_explain'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     }
   ];
   
@@ -278,13 +294,21 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
     }
   };
   
-  // Register handlers with the MCP server
-  server.setRequestHandler(ListToolsRequestSchema, handlers['tools/list']);
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    return handlers['tools/call'](request.params);
-  });
-  
-  return { server, cacheManager, tools, handlers };
+  return { cacheManager, tools, handlers, rateLimit, cacheTTL };
+}
+
+/**
+ * Create MCP server with proper protocol implementation
+ */
+export async function createMCPServer() {
+  const runtime = await createMCPRuntime();
+  const server = createConfiguredServer(
+    runtime.rateLimit,
+    runtime.cacheTTL,
+    runtime.handlers,
+  );
+
+  return { server, ...runtime };
 }
 
 /**
@@ -324,16 +348,7 @@ export async function startStdioServer() {
  * Start server with streamable HTTP transport for Postman MCP
  */
 export async function startHttpServer(port: number = 3000) {
-  const { server, cacheManager } = await createMCPServer();
-  
-  // Create transport - stateless mode for simpler setup
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined, // Stateless mode - no session management
-    enableJsonResponse: false // Use SSE for notifications
-  });
-  
-  // Connect MCP server to transport
-  await server.connect(transport);
+  const { cacheManager, handlers, rateLimit, cacheTTL } = await createMCPRuntime();
   
   // Create HTTP server
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -377,6 +392,38 @@ export async function startHttpServer(port: number = 3000) {
     
     // Handle MCP endpoint - delegate to transport
     if (req.url === '/mcp') {
+      const handleMCPRequest = async (parsedBody?: unknown) => {
+        const requestServer = createConfiguredServer(rateLimit, cacheTTL, handlers);
+        const requestTransport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined, // Stateless mode - no session management
+          enableJsonResponse: false // Use SSE for notifications
+        });
+
+        let cleanedUp = false;
+        const cleanupRequest = async () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          try {
+            await requestTransport.close();
+            await requestServer.close();
+          } catch (error) {
+            console.error('Error cleaning up MCP request transport:', error);
+          }
+        };
+
+        res.once('close', () => {
+          void cleanupRequest();
+        });
+
+        try {
+          await requestServer.connect(requestTransport);
+          await requestTransport.handleRequest(req, res, parsedBody);
+        } catch (error) {
+          await cleanupRequest();
+          throw error;
+        }
+      };
+
       // Parse body for POST requests
       if (req.method === 'POST') {
         let body = '';
@@ -418,9 +465,10 @@ export async function startHttpServer(port: number = 3000) {
 
         req.on('end', async () => {
           clearTimeout(dataTimeoutId);
+          let parsedBody: unknown;
+
           try {
-            const parsedBody = JSON.parse(body);
-            await transport.handleRequest(req, res, parsedBody);
+            parsedBody = JSON.parse(body);
           } catch (error) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
@@ -431,6 +479,25 @@ export async function startHttpServer(port: number = 3000) {
               },
               id: null
             }));
+            return;
+          }
+
+          try {
+            await handleMCPRequest(parsedBody);
+          } catch (error) {
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                jsonrpc: '2.0',
+                error: {
+                  code: -32603,
+                  message: 'Internal server error'
+                },
+                id: null
+              }));
+            } else {
+              res.destroy(error instanceof Error ? error : undefined);
+            }
           }
         });
 
@@ -439,7 +506,7 @@ export async function startHttpServer(port: number = 3000) {
         });
       } else {
         // GET or DELETE requests
-        await transport.handleRequest(req, res);
+        await handleMCPRequest();
       }
       return;
     }

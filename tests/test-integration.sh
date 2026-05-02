@@ -312,11 +312,11 @@ READONLY_COUNT=$(echo "$TOOLS_LIST" | node -e "
   let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
     const r=JSON.parse(d);
     const tools=r.result?.tools||[];
-    const count=tools.filter(t=>t.readOnlyHint===true).length;
+    const count=tools.filter(t=>t.annotations?.readOnlyHint===true).length;
     console.log(count);
   });
 " 2>/dev/null)
-assert "All 5 tools have readOnlyHint=true (NEW)" "[ '$READONLY_COUNT' = '5' ]"
+assert "All 5 tools have annotations.readOnlyHint=true (NEW)" "[ '$READONLY_COUNT' = '5' ]"
 
 # Check schemas have proper structure (NEW zodSchemaToMCPInputSchema)
 SCHEMA_CHECK=$(echo "$TOOLS_LIST" | node -e "
