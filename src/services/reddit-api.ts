@@ -132,7 +132,10 @@ export class RedditAPI {
       }
     } else if (postId.includes('_')) {
       // Format: subreddit_postid (or _postid for short URLs like redd.it)
-      [subreddit, id] = postId.split('_');
+      // Use lastIndexOf to handle subreddits with underscores (e.g. world_news_1abc2d3)
+      const lastUnderscore = postId.lastIndexOf('_');
+      subreddit = postId.substring(0, lastUnderscore);
+      id = postId.substring(lastUnderscore + 1);
 
       // Handle short URLs (redd.it) where subreddit is empty - fall through to lookup
       if (!subreddit) {
