@@ -35,7 +35,7 @@ export interface RedditComment {
   created_utc: number;
   permalink: string;
   depth: number;
-  replies?: RedditComment[];
+  replies?: RedditListing<RedditComment> | '';
   distinguished?: string;
   is_submitter?: boolean;
   stickied?: boolean;
