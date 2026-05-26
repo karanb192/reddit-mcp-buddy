@@ -85,7 +85,7 @@ jobs:
           ./mcp-publisher --version || echo "Version check failed, continuing..."
 
       - name: Login to MCP Registry
-        run: ./mcp-publisher login github-oidc
+        run: ./mcp-publisher login github-oidc --audience https://registry.modelcontextprotocol.io
 
       - name: Publish to MCP Registry
         run: |
