@@ -270,33 +270,64 @@ export class RedditTools {
       locked: post.locked,
     };
 
-    // Process comments
-    const comments = commentsListing.data.children
-      .filter(child => child.kind === 't1') // Only comments
-      .map(child => child.data);
+    interface CommentNode {
+      id: string;
+      author: string;
+      score: number;
+      body: string;
+      created_utc: number;
+      depth: number;
+      is_op: boolean;
+      permalink: string;
+      replies: CommentNode[];
+    }
+
+    const buildCommentTree = (listing: typeof commentsListing): CommentNode[] => {
+      const nodes: CommentNode[] = [];
+      for (const child of listing.data.children) {
+        if (child.kind !== 't1') continue;
+        const c = child.data;
+        const node: CommentNode = {
+          id: c.id,
+          author: c.author,
+          score: c.score,
+          body: (c.body || '').substring(0, 500),
+          created_utc: c.created_utc,
+          depth: c.depth,
+          is_op: c.is_submitter ?? false,
+          permalink: `https://reddit.com${c.permalink}`,
+          replies: [],
+        };
+        if (c.replies && typeof c.replies !== 'string' && c.replies.data?.children?.length) {
+          node.replies = buildCommentTree(c.replies as typeof commentsListing);
+        }
+        nodes.push(node);
+      }
+      return nodes;
+    };
+
+    const countComments = (nodes: CommentNode[]): number =>
+      nodes.reduce((sum, n) => sum + 1 + countComments(n.replies), 0);
+
+    const commentTree = buildCommentTree(commentsListing);
 
     let result: any = {
       post: cleanPost,
-      total_comments: comments.length,
-      top_comments: comments.slice(0, params.max_top_comments || 5).map(c => ({
-        id: c.id,
-        author: c.author,
-        score: c.score,
-        body: (c.body || '').substring(0, 500),
-        created_utc: c.created_utc,
-        depth: c.depth,
-        is_op: c.is_submitter,
-        permalink: `https://reddit.com${c.permalink}`,
-      })),
+      total_comments: countComments(commentTree),
+      top_comments: commentTree.slice(0, params.max_top_comments || 5),
     };
 
     // Extract links if requested
     if (params.extract_links) {
       const links = new Set<string>();
-      comments.forEach(c => {
-        const urls = (c.body || '').match(/https?:\/\/[^\s]+/g) || [];
-        urls.forEach(url => links.add(url));
-      });
+      const extractLinks = (nodes: CommentNode[]) => {
+        for (const node of nodes) {
+          const urls = node.body.match(/https?:\/\/[^\s]+/g) || [];
+          urls.forEach(url => links.add(url));
+          if (node.replies.length) extractLinks(node.replies);
+        }
+      };
+      extractLinks(commentTree);
       result.extracted_links = Array.from(links);
     }
 
