@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { RedditAPI } from '../services/reddit-api.js';
+import { RedditAPI, RSS_UNKNOWN_SCORE } from '../services/reddit-api.js';
 import { ContentProcessor } from '../services/content-processor.js';
 import { RedditListing, RedditPost } from '../types/reddit.types.js';
 
@@ -52,6 +52,28 @@ export const redditExplainSchema = z.object({
 });
 
 /**
+ * Shape RSS-sourced posts for consumption by an LLM.
+ *
+ * Reddit's public Atom feed (used as the credential-free fallback) does not
+ * include engagement metrics — score, num_comments and upvote_ratio are absent.
+ * The API client marks those fields with RSS_UNKNOWN_SCORE; here they are
+ * normalized to null and an explanatory note is attached so the model treats
+ * them as unavailable rather than inferring popularity from placeholder values.
+ */
+function shapeRssPosts(posts: any[]): { posts: any[]; note: string } {
+  const cleaned = posts.map(p => ({
+    ...p,
+    score: p.score === RSS_UNKNOWN_SCORE ? null : p.score,
+    num_comments: p.num_comments === RSS_UNKNOWN_SCORE ? null : p.num_comments,
+    upvote_ratio: p.upvote_ratio ?? null,
+  }));
+  return {
+    posts: cleaned,
+    note: 'Served from Reddit\'s public RSS feed (credential-free fallback used because the JSON API was unavailable). score, num_comments, and upvote_ratio are not provided by RSS and are null — do not infer or estimate popularity from them.',
+  };
+}
+
+/**
  * Tool implementations
  */
 export class RedditTools {
@@ -94,10 +116,21 @@ export class RedditTools {
       link_flair_text: child.data.link_flair_text,
     }));
 
+    const dataSource = listing.data._source ?? 'api';
+
     let result: any = {
       posts,
-      total_posts: posts.length
+      total_posts: posts.length,
+      data_source: dataSource,
     };
+
+    // When data came from the RSS fallback, engagement metrics are unavailable.
+    // Shape them so the LLM doesn't fabricate popularity numbers.
+    if (dataSource === 'rss') {
+      const shaped = shapeRssPosts(posts);
+      result.posts = shaped.posts;
+      result.note = shaped.note;
+    }
 
     // Optionally fetch subreddit info
     if (params.include_subreddit_info) {
