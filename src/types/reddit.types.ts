@@ -91,6 +91,10 @@ export interface RedditListing<T> {
     }>;
     dist?: number;
     modhash?: string;
+    // Origin of the data. 'rss' means it was synthesized from Reddit's
+    // public Atom feed (credential-free fallback) and lacks engagement
+    // metrics like score/num_comments/upvote_ratio.
+    _source?: 'api' | 'rss';
   };
 }
 
