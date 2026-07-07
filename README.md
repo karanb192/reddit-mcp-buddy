@@ -551,3 +551,5 @@ MIT - Use it however you want!
 ---
 
 Made with ❤️ for the MCP community. No venture capital, no tracking, just a good MCP server.
+
+Built by [Karan Bansal](https://karanbansal.in) (Head of AI at ArmorCode). I write about Claude Code, MCP, and production agentic AI at [karanbansal.in/blog](https://karanbansal.in/blog/).
