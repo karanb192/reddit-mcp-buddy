@@ -551,3 +551,8 @@ MIT - Use it however you want!
 ---
 
 Made with ❤️ for the MCP community. No venture capital, no tracking, just a good MCP server.
+## Discovery
+
+[![Beacon Verified](https://registry-ruby.vercel.app/api/v1/agents/karanb192%2Freddit-mcp-buddy/badge.svg)](https://portal-five-phi-54.vercel.app/?q=karanb192%2Freddit-mcp-buddy)
+
+Listed on [Beacon](https://portal-five-phi-54.vercel.app) — searchable index of open-source MCP servers.

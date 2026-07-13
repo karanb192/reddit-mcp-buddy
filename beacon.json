@@ -1,0 +1,26 @@
+{
+  "beacon_manifest": "0.1",
+  "id": "karanb192/reddit-mcp-buddy",
+  "name": "Reddit Mcp Buddy",
+  "description": "Open-source AI agent \u2014 ai-assistant, claude, mcp, mcp-server.",
+  "capabilities": [
+    "ai-assistant",
+    "claude",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "reddit",
+    "reddit-api",
+    "clean",
+    "llm-optimized",
+    "server"
+  ],
+  "interfaces": [
+    {
+      "type": "mcp",
+      "endpoint": "https://github.com/karanb192/reddit-mcp-buddy"
+    }
+  ],
+  "source": "https://github.com/karanb192/reddit-mcp-buddy",
+  "homepage": "https://github.com/karanb192/reddit-mcp-buddy"
+}
