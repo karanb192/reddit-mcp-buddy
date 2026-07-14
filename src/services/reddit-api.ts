@@ -211,7 +211,9 @@ export class RedditAPI {
       // back to the comments page, it's a text post.
       const contentHtml = this.decodeEntities(pick('content') || '');
       const outboundMatch = contentHtml.match(/<a href="([^"]+)">\s*\[link\]/);
-      const outboundUrl = outboundMatch ? outboundMatch[1] : '';
+      // Reddit double-escapes entities inside <content>, so the extracted href
+      // needs a second decode (?a=1&amp;b=2 -> ?a=1&b=2), same as selftext below.
+      const outboundUrl = outboundMatch ? this.decodeEntities(outboundMatch[1]) : '';
       const is_self = !outboundUrl || outboundUrl.includes('/comments/');
       const url = is_self ? `https://www.reddit.com${permalink}` : outboundUrl;
 

@@ -59,6 +59,11 @@ export const redditExplainSchema = z.object({
  * The API client marks those fields with RSS_UNKNOWN_SCORE; here they are
  * normalized to null and an explanatory note is attached so the model treats
  * them as unavailable rather than inferring popularity from placeholder values.
+ *
+ * The feed also carries no per-post over_18 flag, so the include_nsfw filter
+ * cannot apply to RSS results — nsfw is set to null and the note discloses it.
+ * (Reddit's logged-out feed refuses NSFW subreddits outright with an error,
+ * but individual posts inside SFW subreddits come with no flag to check.)
  */
 function shapeRssPosts(posts: any[]): { posts: any[]; note: string } {
   const cleaned = posts.map(p => ({
@@ -66,10 +71,11 @@ function shapeRssPosts(posts: any[]): { posts: any[]; note: string } {
     score: p.score === RSS_UNKNOWN_SCORE ? null : p.score,
     num_comments: p.num_comments === RSS_UNKNOWN_SCORE ? null : p.num_comments,
     upvote_ratio: p.upvote_ratio ?? null,
+    nsfw: p.nsfw ?? null,
   }));
   return {
     posts: cleaned,
-    note: 'Served from Reddit\'s public RSS feed (credential-free fallback used because the JSON API was unavailable). score, num_comments, and upvote_ratio are not provided by RSS and are null — do not infer or estimate popularity from them.',
+    note: 'Served from Reddit\'s public RSS feed (credential-free fallback used because the JSON API was unavailable). score, num_comments, and upvote_ratio are not provided by RSS and are null — do not infer or estimate popularity from them. NSFW flags are also not provided (nsfw is null), so the include_nsfw filter does not apply to these posts; Reddit\'s logged-out feed blocks NSFW subreddits entirely, but posts within other subreddits are unfiltered.',
   };
 }
 
@@ -89,7 +95,8 @@ export class RedditTools {
       }
     );
 
-    // Filter NSFW content unless requested
+    // Filter NSFW content unless requested. RSS-sourced posts carry no
+    // over_18 flag and pass through — disclosed via the note in shapeRssPosts.
     if (!params.include_nsfw) {
       listing.data.children = listing.data.children.filter(
         child => !child.data.over_18
