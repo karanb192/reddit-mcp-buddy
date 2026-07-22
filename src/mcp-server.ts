@@ -198,7 +198,7 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
   const toolDefinitions: Tool[] = [
     {
       name: 'browse_subreddit',
-      description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising). Returns post list with content, scores, and metadata.',
+      description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising/controversial). Returns a post list with content, metadata, and a data_source field. With Reddit credentials (data_source "api") posts include score, num_comments, and upvote_ratio; without credentials, results come from Reddit\'s public RSS feed (data_source "rss") and those fields plus nsfw are null — see the response note and do not infer popularity from them.',
       inputSchema: zodSchemaToMCPInputSchema(browseSubredditSchema, 'browse_subreddit'),
       readOnlyHint: true
     },

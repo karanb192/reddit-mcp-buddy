@@ -14,7 +14,7 @@ export const browseSubredditSchema = z.object({
   time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional(),
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Change ONLY IF user specifies.'),
   include_nsfw: z.boolean().optional().default(false),
-  include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description'),
+  include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description. Requires Reddit credentials; silently omitted when browsing anonymously via the RSS fallback'),
 });
 
 export const searchRedditSchema = z.object({

@@ -1014,6 +1014,53 @@ NOCACHE_TEST=$(node --input-type=module -e "
 " 2>/dev/null)
 assert "REDDIT_BUDDY_NO_CACHE: true/1/yes/on/TRUE/trimmed/false/0/empty/undefined" "[ '$NOCACHE_TEST' = 'pass' ]"
 
+# --------------------------------------------------------------------------
+# 2s. RSS Atom Parser + Anonymous Fallback Shaping (reddit-api.ts, tools/index.ts) — NEW
+# --------------------------------------------------------------------------
+log_subsection "2s. RSS Atom Parser + Fallback Shaping — NEW"
+
+RSS_PARSER_RESULT=$(node --input-type=module -e '
+  import { AuthManager } from "./dist/core/auth.js";
+  import { RateLimiter } from "./dist/core/rate-limiter.js";
+  import { CacheManager } from "./dist/core/cache.js";
+  import { RedditAPI } from "./dist/services/reddit-api.js";
+  import { RedditTools } from "./dist/tools/index.js";
+
+  const api = new RedditAPI({
+    authManager: new AuthManager(),
+    rateLimiter: new RateLimiter({ limit: 10, window: 60000, name: "test" }),
+    cacheManager: new CacheManager(),
+  });
+
+  // Synthetic Reddit Atom feed. Reddit double-escapes entities inside
+  // <content type="html">: a literal & in a link URL appears in raw XML as
+  // &amp;amp; and an apostrophe as &amp;#39;.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><author><name>/u/linkposter</name></author><category term="technology" label="r/technology"/><id>t3_aaa111</id><link href="https://www.reddit.com/r/technology/comments/aaa111/multi_param_link/" /><published>2026-07-10T12:00:00+00:00</published><title>Multi param link post</title><content type="html">&lt;table&gt;&lt;tr&gt;&lt;td&gt; &lt;span&gt;&lt;a href="https://www.youtube.com/watch?v=abc123&amp;amp;t=30s&amp;amp;feature=share"&gt; [link]&lt;/a&gt;&lt;/span&gt; &lt;span&gt;&lt;a href="https://www.reddit.com/r/technology/comments/aaa111/multi_param_link/"&gt;[comments]&lt;/a&gt;&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</content></entry><entry><author><name>/u/selfposter</name></author><category term="technology" label="r/technology"/><id>t3_bbb222</id><link href="https://www.reddit.com/r/technology/comments/bbb222/self_post/" /><published>2026-07-10T13:00:00+00:00</published><title>Self post with entities</title><content type="html">&lt;div class="md"&gt;&lt;p&gt;Tom &amp;amp; Jerry&amp;#39;s guide&lt;/p&gt;&lt;/div&gt; &lt;span&gt;&lt;a href="https://www.reddit.com/r/technology/comments/bbb222/self_post/"&gt; [link]&lt;/a&gt;&lt;/span&gt;</content></entry></feed>`;
+
+  const listing = api["parseAtomFeed"](xml, "technology");
+  const [link, self] = listing.data.children.map(c => c.data);
+
+  // Outbound link URLs must be decoded TWICE (2+ query params survive intact)
+  const t1 = link.url === "https://www.youtube.com/watch?v=abc123&t=30s&feature=share";
+  const t2 = link.is_self === false && link.id === "aaa111";
+  const t3 = self.is_self === true;
+  const t4 = self.selftext === "Tom & Jerry\u0027s guide";
+  // RSS has no over_18 flag — parser must not invent one
+  const t5 = link.over_18 === undefined;
+  const t6 = listing.data._source === "rss";
+
+  // Tools-layer shaping: metrics and nsfw surface as explicit null + note
+  const tools = new RedditTools({ browseSubreddit: async () => listing });
+  const res = await tools.browseSubreddit({ subreddit: "technology", sort: "hot", limit: 25, include_nsfw: false });
+  const t7 = res.data_source === "rss";
+  const t8 = res.posts[0].nsfw === null && res.posts[0].score === null && res.posts[0].num_comments === null;
+  const t9 = /NSFW flags are also not provided/.test(res.note) && /do not infer or estimate popularity/.test(res.note);
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9}));
+' 2>/dev/null)
+assert "RSS fallback: double-decoded URLs, selftext, null metrics/nsfw + note" "echo \"\$RSS_PARSER_RESULT\" | grep -q '^pass$'"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

@@ -2,7 +2,7 @@
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - no API keys required.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - browse subreddits with no API keys; add free Reddit credentials for search, comments, user analysis, and full metrics.
 
 [![MCP Registry](https://img.shields.io/npm/v/reddit-mcp-buddy?label=MCP%20Registry&color=blue)](https://registry.modelcontextprotocol.io)
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
@@ -40,7 +40,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## What makes Reddit MCP Buddy different?
 
-- **🚀 Zero setup** - Works instantly, no Reddit API registration needed
+- **🚀 Zero setup** - Browse subreddits instantly, no Reddit API registration needed (search, comments, user analysis, and engagement metrics need free credentials)
 - **⚡ Up to 10x more requests** - Three-tier authentication system (10/60/100 requests per minute)
 - **🎯 Clean data** - No fake "sentiment analysis" or made-up metrics
 - **🧠 LLM-optimized** - Built specifically for AI assistants like Claude
@@ -103,8 +103,10 @@ Browse posts from any subreddit with sorting options.
   - Any specific subreddit (e.g., "technology", "programming", "science")
 - Sort by: hot, new, top, rising, controversial
 - Time range: hour, day, week, month, year, all (for top/controversial sort)
-- Include subreddit info: Optional flag for subreddit metadata
+- Include subreddit info: Optional flag for subreddit metadata (requires credentials)
 ```
+
+> **No credentials?** Results are served from Reddit's public RSS feed (`data_source: "rss"`): `score`, `num_comments`, `upvote_ratio`, and `nsfw` come back `null`, and the `include_nsfw` filter can't be applied. Add credentials ([Authentication](#authentication-optional)) for full data via the API.
 
 ### `search_reddit`
 Search across Reddit or specific subreddits.
@@ -192,7 +194,7 @@ Reddit MCP Buddy supports three authentication levels, each with different rate 
 | **Authenticated** | 100 req/min | All 4 credentials | Heavy usage, automation |
 
 #### How It Works:
-- **Anonymous Mode**: Default mode, no setup required, uses public Reddit API
+- **Anonymous Mode**: Default mode, no setup required. Only `browse_subreddit` works — Reddit blocks the logged-out JSON API, so results come from Reddit's public RSS feed (`data_source: "rss"`) with engagement metrics and NSFW flags as `null`. Other tools require credentials.
 - **App-Only Mode**: Uses OAuth2 client credentials grant (works with both script and web apps)
 - **Authenticated Mode**: Uses OAuth2 password grant (requires script app type)
 
@@ -420,6 +422,11 @@ npm --version
 # Try with full npx path
 $(npm bin -g)/reddit-mcp-buddy
 ```
+
+**Browsing works but search / comments / user analysis fail**
+- Without credentials only `browse_subreddit` works, served from Reddit's public RSS feed (no scores or comment counts)
+- Anonymous browsing can also hit Reddit's own RSS rate limit (HTTP 429)
+- Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
 
 **Rate limit errors**
 - Without auth: Limited to 10 requests/minute
