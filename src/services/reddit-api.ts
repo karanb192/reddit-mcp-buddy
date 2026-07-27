@@ -20,6 +20,14 @@ export interface RedditAPIOptions {
   timeout?: number;
 }
 
+/**
+ * Sentinel for engagement metrics that RSS feeds don't provide.
+ * -1 is unambiguous (real Reddit scores can be negative but never below the
+ * post's own downvotes; num_comments is never negative), so the tools layer
+ * can detect "unknown" and decide how to present it to the LLM.
+ */
+export const RSS_UNKNOWN_SCORE = -1;
+
 export class RedditAPI {
   private auth: AuthManager;
   private rateLimiter: RateLimiter;
@@ -93,15 +101,202 @@ export class RedditAPI {
     // All subreddits use /r/ prefix
     const endpoint = `/r/${subreddit}/${sort}.json`;
 
-    // Make request
-    const data = await this.get<RedditListing<RedditPost>>(
-      `${endpoint}?${params.toString()}`
-    );
+    // Make request, with a credential-free RSS fallback.
+    // Reddit network-blocks the unauthenticated .json API from many IPs
+    // (403 "Blocked" from snooserv) regardless of headers. The public Atom
+    // feed (.rss) still serves without auth, so fall back to it when we have
+    // no token. Authenticated requests go to oauth.reddit.com and don't need this.
+    let data: RedditListing<RedditPost>;
+    try {
+      data = await this.get<RedditListing<RedditPost>>(
+        `${endpoint}?${params.toString()}`
+      );
+      data.data._source = 'api';
+    } catch (error) {
+      if (this.auth.isAuthenticated()) {
+        throw error; // OAuth path should work; don't mask real failures
+      }
+      console.error(`⚠️ Anonymous .json failed (${error instanceof Error ? error.message : error}). Falling back to RSS feed.`);
+      try {
+        data = await this.browseSubredditViaRSS(subreddit, sort, { limit, time });
+      } catch (rssError) {
+        // Surface both failures so the cause is clear
+        throw new Error(
+          `Both the JSON API and the RSS fallback failed for r/${subreddit}. ` +
+          `API: ${error instanceof Error ? error.message : error}. ` +
+          `RSS: ${rssError instanceof Error ? rssError.message : rssError}`
+        );
+      }
+    }
 
     // Cache result
     this.cache.set(cacheKey, data);
-    
+
     return data;
+  }
+
+  /**
+   * Browse a subreddit via Reddit's public Atom (RSS) feed.
+   * Credential-free fallback used when the unauthenticated JSON API is blocked.
+   * NOTE: RSS lacks engagement metrics (score, num_comments, upvote_ratio).
+   */
+  private async browseSubredditViaRSS(
+    subreddit: string,
+    sort: 'hot' | 'new' | 'top' | 'rising' | 'controversial',
+    options: { limit?: number; time?: string } = {}
+  ): Promise<RedditListing<RedditPost>> {
+    const { limit = 25, time } = options;
+
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (time && (sort === 'top' || sort === 'controversial')) {
+      params.append('t', time);
+    }
+
+    const xml = await this.getRSS(`/r/${subreddit}/${sort}/.rss?${params.toString()}`);
+    return this.parseAtomFeed(xml, subreddit);
+  }
+
+  /**
+   * Private: Decode XML/HTML entities found in Atom feed text.
+   */
+  private decodeEntities(text: string): string {
+    return text
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&'); // must run last
+  }
+
+  /**
+   * Private: Parse a Reddit Atom feed into the same RedditListing<RedditPost>
+   * shape the rest of the pipeline expects. Engagement fields are unknown from
+   * RSS and are left at sentinel values (see RSS_UNKNOWN_SCORE) for the tools
+   * layer to represent to the LLM.
+   */
+  private parseAtomFeed(xml: string, fallbackSubreddit: string): RedditListing<RedditPost> {
+    const children: RedditListing<RedditPost>['data']['children'] = [];
+
+    const entryMatches = xml.match(/<entry>([\s\S]*?)<\/entry>/g) || [];
+    for (const entryXml of entryMatches) {
+      const pick = (tag: string): string | undefined => {
+        const m = entryXml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`));
+        return m ? m[1].trim() : undefined;
+      };
+
+      const rawId = pick('id') || '';
+      const id = rawId.replace(/^t3_/, '');
+      if (!id) continue;
+
+      const title = this.decodeEntities(pick('title') || '');
+
+      const authorMatch = entryXml.match(/<name>([\s\S]*?)<\/name>/);
+      const author = (authorMatch ? authorMatch[1] : '').replace(/^\/u\//, '').trim() || '[unknown]';
+
+      const linkMatch = entryXml.match(/<link[^>]*href="([^"]+)"/);
+      const permalinkFull = linkMatch ? this.decodeEntities(linkMatch[1]) : '';
+      const permalink = permalinkFull.replace(/^https?:\/\/[^/]+/, '');
+
+      const subMatch = permalinkFull.match(/\/r\/([^/]+)/);
+      const categoryMatch = entryXml.match(/<category[^>]*term="([^"]+)"/);
+      const subreddit = (subMatch?.[1] || categoryMatch?.[1] || fallbackSubreddit).trim();
+
+      const published = pick('published') || pick('updated');
+      const created_utc = published ? Math.floor(Date.parse(published) / 1000) : 0;
+
+      // The decoded content HTML contains the external "[link]" anchor and,
+      // for self-posts, the post body. Extract the outbound URL; if it points
+      // back to the comments page, it's a text post.
+      const contentHtml = this.decodeEntities(pick('content') || '');
+      const outboundMatch = contentHtml.match(/<a href="([^"]+)">\s*\[link\]/);
+      const outboundUrl = outboundMatch ? outboundMatch[1] : '';
+      const is_self = !outboundUrl || outboundUrl.includes('/comments/');
+      const url = is_self ? `https://www.reddit.com${permalink}` : outboundUrl;
+
+      // Self-post body: strip the markdown div, cut at the "submitted by" footer.
+      let selftext: string | undefined;
+      if (is_self) {
+        const bodyMatch = contentHtml.match(/<div class="md">([\s\S]*?)<\/div>/);
+        if (bodyMatch) {
+          // Reddit double-escapes entities inside <content>, so decode again
+          // after stripping the inner HTML tags.
+          selftext = this.decodeEntities(
+            bodyMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+          );
+        }
+      }
+
+      const post: RedditPost = {
+        id,
+        title,
+        author,
+        subreddit,
+        subreddit_name_prefixed: `r/${subreddit}`,
+        score: RSS_UNKNOWN_SCORE,
+        num_comments: RSS_UNKNOWN_SCORE,
+        ups: RSS_UNKNOWN_SCORE,
+        downs: 0,
+        created_utc,
+        url,
+        permalink,
+        is_self,
+        selftext,
+      };
+
+      children.push({ kind: 't3', data: post });
+    }
+
+    return {
+      kind: 'Listing',
+      data: {
+        children,
+        after: null,
+        before: null,
+        _source: 'rss',
+      },
+    };
+  }
+
+  /**
+   * Private: Fetch a Reddit RSS/Atom endpoint and return the raw XML text.
+   * Uses the same rate limiter and timeout as the JSON path.
+   */
+  private async getRSS(endpoint: string): Promise<string> {
+    if (!this.rateLimiter.canMakeRequest()) {
+      throw new Error(this.rateLimiter.getErrorMessage(this.auth.isAuthenticated()));
+    }
+
+    const headers = await this.auth.getHeaders();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      this.rateLimiter.recordRequest();
+
+      if (!response.ok) {
+        throw new Error(`RSS feed request failed (${response.status})`);
+      }
+
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('text/html')) {
+        throw new Error('RSS endpoint returned HTML (likely blocked)');
+      }
+
+      return await response.text();
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('RSS feed request timed out');
+      }
+      throw error;
+    }
   }
 
   /**

@@ -11,7 +11,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && (chmod +x dist/cli.js 2>/dev/null || true)",
+    "build": "tsc",
+    "postbuild": "node -e \"try{require('fs').chmodSync('dist/cli.js',0o755)}catch(e){}\"",
     "start": "node dist/index.js",
     "start:http": "REDDIT_BUDDY_HTTP=true node dist/index.js",
     "test": "bash tests/test-unit.sh",
@@ -21,6 +22,8 @@
     "test:rate-limit:anon": "node scripts/rate-limit-tester.cjs anonymous 15",
     "test:rate-limit:app": "node scripts/rate-limit-tester.cjs app-only 70",
     "test:rate-limit:auth": "node scripts/rate-limit-tester.cjs auth 120",
+    "build:mcpb": "npm run build && bash scripts/build-mcpb.sh",
+    "build:mcpb:win": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcpb.ps1",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
