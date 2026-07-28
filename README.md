@@ -188,9 +188,11 @@ Reddit MCP Buddy supports three authentication levels, each with different rate 
 
 | Mode | Rate Limit | Required Credentials | Best For |
 |------|------------|---------------------|----------|
-| **Anonymous** | 10 req/min | None | Testing, light usage |
+| **Anonymous** | 10 req/min* | None | Testing, light usage |
 | **App-Only** | 60 req/min | Client ID + Secret | Regular browsing |
 | **Authenticated** | 100 req/min | All 4 credentials | Heavy usage, automation |
+
+*\*Server-side cap. Anonymous requests are served from Reddit's logged-out RSS feed, which applies its own stricter per-IP throttle (often one uncached request per 25-60 seconds). The 15-minute cache and automatic retries absorb much of this, but sustained anonymous browsing is effectively slower than 10 req/min.*
 
 #### How It Works:
 - **Anonymous Mode**: Default mode, no setup required. Only `browse_subreddit` (plus the offline `reddit_explain`) works: Reddit blocks the logged-out JSON API, so browse results come from Reddit's public RSS feed (`data_source: "rss"`) with engagement metrics and NSFW flags as `null`. The remaining tools require credentials.
@@ -359,7 +361,7 @@ cd reddit-mcp-buddy
 | App-only | 60 | 5 min | Client ID + Secret |
 | Authenticated | 100 | 5 min | All credentials |
 
-*Cache TTL applies to subreddit listings. Post details (10 min), search results (10 min), and user profiles (15 min) use fixed TTLs in all modes.*
+*Cache TTL applies to subreddit listings. Post details (10 min), search results (10 min), and user profiles (15 min) use fixed TTLs in all modes. Anonymous throughput is additionally bounded by Reddit's own per-IP RSS throttle, which is stricter than 10/min for uncached requests.*
 
 ## Why Reddit MCP Buddy?
 
@@ -435,7 +437,7 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 - Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
 
 **Rate limit errors**
-- Without auth: Limited to 10 requests/minute
+- Without auth: 10 requests/minute server cap, and Reddit's own RSS feed throttles harder per IP (the server retries automatically)
 - With app credentials only: 60 requests/minute
 - With full authentication: 100 requests/minute
 - Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
