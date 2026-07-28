@@ -1014,6 +1014,200 @@ NOCACHE_TEST=$(node --input-type=module -e "
 " 2>/dev/null)
 assert "REDDIT_BUDDY_NO_CACHE: true/1/yes/on/TRUE/trimmed/false/0/empty/undefined" "[ '$NOCACHE_TEST' = 'pass' ]"
 
+# --------------------------------------------------------------------------
+# 2s. RSS Atom Parser + Anonymous Fallback Shaping (reddit-api.ts, tools/index.ts) — NEW
+# --------------------------------------------------------------------------
+log_subsection "2s. RSS Atom Parser + Fallback Shaping — NEW"
+
+RSS_PARSER_RESULT=$(node --input-type=module -e '
+  import { AuthManager } from "./dist/core/auth.js";
+  import { RateLimiter } from "./dist/core/rate-limiter.js";
+  import { CacheManager } from "./dist/core/cache.js";
+  import { RedditAPI } from "./dist/services/reddit-api.js";
+  import { RedditTools } from "./dist/tools/index.js";
+
+  const api = new RedditAPI({
+    authManager: new AuthManager(),
+    rateLimiter: new RateLimiter({ limit: 10, window: 60000, name: "test" }),
+    cacheManager: new CacheManager(),
+  });
+
+  // Synthetic Reddit Atom feed. Reddit double-escapes entities inside
+  // <content type="html">: a literal & in a link URL appears in raw XML as
+  // &amp;amp; and an apostrophe as &amp;#39;.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><author><name>/u/linkposter</name></author><category term="technology" label="r/technology"/><id>t3_aaa111</id><link href="https://www.reddit.com/r/technology/comments/aaa111/multi_param_link/" /><published>2026-07-10T12:00:00+00:00</published><title>Multi param link post</title><content type="html">&lt;table&gt;&lt;tr&gt;&lt;td&gt; &lt;span&gt;&lt;a href="https://www.youtube.com/watch?v=abc123&amp;amp;t=30s&amp;amp;feature=share"&gt; [link]&lt;/a&gt;&lt;/span&gt; &lt;span&gt;&lt;a href="https://www.reddit.com/r/technology/comments/aaa111/multi_param_link/"&gt;[comments]&lt;/a&gt;&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</content></entry><entry><author><name>/u/selfposter</name></author><category term="technology" label="r/technology"/><id>t3_bbb222</id><link href="https://www.reddit.com/r/technology/comments/bbb222/self_post/" /><published>2026-07-10T13:00:00+00:00</published><title>Self post with entities</title><content type="html">&lt;div class="md"&gt;&lt;p&gt;Tom &amp;amp; Jerry&amp;#39;s guide&lt;/p&gt;&lt;/div&gt; &lt;span&gt;&lt;a href="https://www.reddit.com/r/technology/comments/bbb222/self_post/"&gt; [link]&lt;/a&gt;&lt;/span&gt;</content></entry></feed>`;
+
+  const listing = api["parseAtomFeed"](xml, "technology");
+  const [link, self] = listing.data.children.map(c => c.data);
+
+  // Outbound link URLs must be decoded TWICE (2+ query params survive intact)
+  const t1 = link.url === "https://www.youtube.com/watch?v=abc123&t=30s&feature=share";
+  const t2 = link.is_self === false && link.id === "aaa111";
+  const t3 = self.is_self === true;
+  const t4 = self.selftext === "Tom & Jerry\u0027s guide";
+  // RSS has no over_18 flag — parser must not invent one
+  const t5 = link.over_18 === undefined;
+  const t6 = listing.data._source === "rss";
+
+  // Tools-layer shaping: metrics and nsfw surface as explicit null + note
+  const tools = new RedditTools({ browseSubreddit: async () => listing });
+  const res = await tools.browseSubreddit({ subreddit: "technology", sort: "hot", limit: 25, include_nsfw: false });
+  const t7 = res.data_source === "rss";
+  const t8 = res.posts[0].nsfw === null && res.posts[0].score === null && res.posts[0].num_comments === null;
+  const t9 = /NSFW flags are also not provided/.test(res.note) && /do not infer or estimate popularity/.test(res.note);
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9}));
+' 2>/dev/null)
+assert "RSS fallback: double-decoded URLs, selftext, null metrics/nsfw + note" "echo \"\$RSS_PARSER_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2t. RSS Fallback Hardening: is_self heuristic, 429 retry, JSON-skip memo — NEW
+# --------------------------------------------------------------------------
+log_subsection "2t. RSS Fallback Hardening — NEW"
+
+RSS_HARDENING_RESULT=$(node --input-type=module -e '
+  import { AuthManager } from "./dist/core/auth.js";
+  import { RateLimiter } from "./dist/core/rate-limiter.js";
+  import { CacheManager } from "./dist/core/cache.js";
+  import { RedditAPI } from "./dist/services/reddit-api.js";
+
+  const mk = () => new RedditAPI({
+    authManager: new AuthManager(),
+    rateLimiter: new RateLimiter({ limit: 100, window: 60000, name: "test" }),
+    cacheManager: new CacheManager(),
+  });
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const entry = (id, permalink, content) => `<entry><author><name>/u/x</name></author><id>t3_${id}</id><link href="https://www.reddit.com${permalink}" /><published>2026-07-10T12:00:00+00:00</published><title>t</title><content type="html">${esc(content)}</content></entry>`;
+  const feed = (...es) => `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">${es.join("")}</feed>`;
+
+  // t1: link post targeting ANOTHER Reddit thread keeps its outbound URL
+  // (r/bestof pattern — must not be misclassified as a self post)
+  const own1 = "/r/bestof/comments/aaa/xxx/";
+  const target = "https://www.reddit.com/r/Awww/comments/bbb/yyy/zzz/";
+  const p1 = mk()["parseAtomFeed"](feed(entry("aaa", own1, `<span><a href="${target}"> [link]</a></span> <span><a href="https://www.reddit.com${own1}">[comments]</a></span>`)), "bestof").data.children[0].data;
+  const t1 = p1.is_self === false && p1.url === target;
+
+  // t2: a "[link]" anchor crafted inside a self-post body cannot hijack url
+  // (Reddit footer anchor comes last and must win)
+  const own2 = "/r/test/comments/ccc/zzz/";
+  const p2 = mk()["parseAtomFeed"](feed(entry("ccc", own2, `<div class="md"><p>body text <a href="https://evil.example/">[link]</a></p></div> <span><a href="https://www.reddit.com${own2}"> [link]</a></span>`)), "test").data.children[0].data;
+  const t2 = p2.is_self === true && p2.url === `https://www.reddit.com${own2}` && p2.selftext.includes("body text");
+
+  const atomOk = () => new Response(feed(entry("ok1", "/r/programming/comments/ok1/t/", `<span><a href="https://example.com/a"> [link]</a></span>`)), { status: 200, headers: { "content-type": "application/atom+xml" } });
+  const blocked = () => new Response("blocked", { status: 403, headers: { "content-type": "text/html" } });
+
+  // t3: transient RSS 429 is retried (honoring Retry-After) and succeeds
+  let rss3 = 0;
+  globalThis.fetch = async (url) => String(url).includes(".rss")
+    ? (++rss3 === 1 ? new Response("", { status: 429, headers: { "retry-after": "0" } }) : atomOk())
+    : blocked();
+  const l3 = await mk().browseSubreddit("programming", "hot", { limit: 5 });
+  const t3 = l3.data._source === "rss" && rss3 === 2;
+
+  // t4: persistent 429 stops after initial + 2 retries and fails cleanly
+  let rss4 = 0;
+  globalThis.fetch = async (url) => String(url).includes(".rss")
+    ? (rss4++, new Response("", { status: 429, headers: { "retry-after": "0" } }))
+    : blocked();
+  let err4 = "";
+  try { await mk().browseSubreddit("programming", "hot", { limit: 5 }); } catch (e) { err4 = e.message; }
+  const t4 = rss4 === 3 && err4.includes("429");
+
+  // t5: once the .json block is proven (RSS succeeded), later browses skip
+  // the doomed .json probe entirely for the session
+  const log5 = [];
+  globalThis.fetch = async (url) => { log5.push(String(url)); return String(url).includes(".rss") ? atomOk() : blocked(); };
+  const api5 = mk();
+  await api5.browseSubreddit("programming", "hot", { limit: 5 });
+  const jsonProbes = log5.filter(u => u.includes(".json")).length;
+  log5.length = 0;
+  await api5.browseSubreddit("askreddit", "new", { limit: 5 });
+  const t5 = jsonProbes === 1 && log5.length === 1 && log5[0].includes(".rss");
+
+  // t6: memo NOT set when RSS also failed (network down is not a proven
+  // policy block) — next browse re-probes .json
+  const log6 = [];
+  let up6 = false;
+  globalThis.fetch = async (url) => { log6.push(String(url)); return String(url).includes(".rss") ? (up6 ? atomOk() : new Response("", { status: 500 })) : blocked(); };
+  const api6 = mk();
+  let threw6 = false;
+  try { await api6.browseSubreddit("programming", "hot", { limit: 5 }); } catch { threw6 = true; }
+  up6 = true; log6.length = 0;
+  await api6.browseSubreddit("askreddit", "new", { limit: 5 });
+  const t6 = threw6 && log6.some(u => u.includes(".json"));
+
+  // t7: memoized-path errors carry subreddit context (404 -> not found)
+  const api7 = mk();
+  globalThis.fetch = async (url) => String(url).includes(".rss") ? atomOk() : blocked();
+  await api7.browseSubreddit("programming", "hot", { limit: 5 }); // latch memo (403 + RSS ok)
+  globalThis.fetch = async () => new Response("", { status: 404 });
+  let err7 = "";
+  try { await api7.browseSubreddit("nosuchsub12345", "hot", { limit: 5 }); } catch (e) { err7 = e.message; }
+  const t7 = err7.includes("r/nosuchsub12345") && /does not exist/i.test(err7);
+
+  // t8: transient JSON 500 does NOT latch the memo — only the 403 block
+  // signature does; next browse re-probes .json
+  const log8 = [];
+  globalThis.fetch = async (url) => { log8.push(String(url)); return String(url).includes(".rss") ? atomOk() : new Response("", { status: 500 }); };
+  const api8 = mk();
+  await api8.browseSubreddit("programming", "hot", { limit: 5 });
+  log8.length = 0;
+  await api8.browseSubreddit("askreddit", "new", { limit: 5 });
+  const t8 = log8.some(u => u.includes(".json"));
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8}));
+' 2>/dev/null)
+assert "RSS hardening: bestof link target kept, body-anchor hijack blocked, 429 retry, JSON-skip memo" "echo \"\$RSS_HARDENING_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2u. Auth Privacy: env creds never persisted, custom UA honored (auth.ts) — NEW
+# --------------------------------------------------------------------------
+log_subsection "2u. Auth Privacy — NEW"
+
+AUTH_PRIVACY_RESULT=$(HOME="$(mktemp -d)" REDDIT_CLIENT_ID="testid" REDDIT_CLIENT_SECRET="testsecret" REDDIT_USER_AGENT="CustomUA/1.0" node --input-type=module -e '
+  import { AuthManager } from "./dist/core/auth.js";
+  import { existsSync } from "node:fs";
+  import { readFile } from "node:fs/promises";
+  import { join } from "node:path";
+  import { homedir } from "node:os";
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ access_token: "tok123456789abcdef-mock", token_type: "bearer", expires_in: 3600, scope: "*" }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const authFile = join(homedir(), ".reddit-mcp-buddy", "auth.json");
+
+  // Env-supplied credentials: token refresh must NOT write auth.json
+  // (README privacy contract: env vars are never persisted by this server)
+  const am = new AuthManager();
+  await am.load();
+  await am.refreshAccessToken();
+  const t1 = !existsSync(authFile);
+  const t2 = am.isAuthenticated() === true;
+
+  // REDDIT_USER_AGENT must reach the actual request headers
+  const h = await am.getHeaders();
+  const t3 = h["User-Agent"] === "CustomUA/1.0";
+
+  // --auth-style setup (config set directly, no load()) must STILL persist,
+  // and never with the password
+  const am2 = new AuthManager();
+  am2["config"] = { clientId: "a", clientSecret: "b", username: "u", password: "p", userAgent: "X/1" };
+  await am2.refreshAccessToken();
+  const t4 = existsSync(authFile);
+  const saved = t4 ? JSON.parse(await readFile(authFile, "utf8")) : {};
+  const t5 = t4 && !("password" in saved);
+
+  // Anonymous (no creds): default UA
+  const am3 = new AuthManager();
+  const h3 = await am3.getHeaders();
+  const t6 = h3["User-Agent"] === "RedditBuddy/1.0 (by /u/karanb192)";
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6}));
+' 2>/dev/null)
+assert "Auth privacy: env creds never hit disk, --auth persists sans password, custom UA honored" "echo \"\$AUTH_PRIVACY_RESULT\" | grep -q '^pass$'"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

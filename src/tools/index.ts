@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { RedditAPI } from '../services/reddit-api.js';
+import { RedditAPI, RSS_UNKNOWN_SCORE } from '../services/reddit-api.js';
 import { ContentProcessor } from '../services/content-processor.js';
 import { RedditListing, RedditPost } from '../types/reddit.types.js';
 
@@ -14,7 +14,7 @@ export const browseSubredditSchema = z.object({
   time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional(),
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Change ONLY IF user specifies.'),
   include_nsfw: z.boolean().optional().default(false),
-  include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description'),
+  include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description. Requires Reddit credentials; silently omitted when browsing anonymously via the RSS fallback'),
 });
 
 export const searchRedditSchema = z.object({
@@ -52,6 +52,34 @@ export const redditExplainSchema = z.object({
 });
 
 /**
+ * Shape RSS-sourced posts for consumption by an LLM.
+ *
+ * Reddit's public Atom feed (used as the credential-free fallback) does not
+ * include engagement metrics — score, num_comments and upvote_ratio are absent.
+ * The API client marks those fields with RSS_UNKNOWN_SCORE; here they are
+ * normalized to null and an explanatory note is attached so the model treats
+ * them as unavailable rather than inferring popularity from placeholder values.
+ *
+ * The feed also carries no per-post over_18 flag, so the include_nsfw filter
+ * cannot apply to RSS results — nsfw is set to null and the note discloses it.
+ * (Reddit's logged-out feed refuses NSFW subreddits outright with an error,
+ * but individual posts inside SFW subreddits come with no flag to check.)
+ */
+function shapeRssPosts(posts: any[]): { posts: any[]; note: string } {
+  const cleaned = posts.map(p => ({
+    ...p,
+    score: p.score === RSS_UNKNOWN_SCORE ? null : p.score,
+    num_comments: p.num_comments === RSS_UNKNOWN_SCORE ? null : p.num_comments,
+    upvote_ratio: p.upvote_ratio ?? null,
+    nsfw: p.nsfw ?? null,
+  }));
+  return {
+    posts: cleaned,
+    note: 'Served from Reddit\'s public RSS feed (credential-free fallback used because the JSON API was unavailable). score, num_comments, and upvote_ratio are not provided by RSS and are null — do not infer or estimate popularity from them. NSFW flags are also not provided (nsfw is null), so the include_nsfw filter does not apply to these posts; Reddit\'s logged-out feed blocks NSFW subreddits entirely, but posts within other subreddits are unfiltered.',
+  };
+}
+
+/**
  * Tool implementations
  */
 export class RedditTools {
@@ -67,7 +95,8 @@ export class RedditTools {
       }
     );
 
-    // Filter NSFW content unless requested
+    // Filter NSFW content unless requested. RSS-sourced posts carry no
+    // over_18 flag and pass through — disclosed via the note in shapeRssPosts.
     if (!params.include_nsfw) {
       listing.data.children = listing.data.children.filter(
         child => !child.data.over_18
@@ -94,10 +123,21 @@ export class RedditTools {
       link_flair_text: child.data.link_flair_text,
     }));
 
+    const dataSource = listing.data._source ?? 'api';
+
     let result: any = {
       posts,
-      total_posts: posts.length
+      total_posts: posts.length,
+      data_source: dataSource,
     };
+
+    // When data came from the RSS fallback, engagement metrics are unavailable.
+    // Shape them so the LLM doesn't fabricate popularity numbers.
+    if (dataSource === 'rss') {
+      const shaped = shapeRssPosts(posts);
+      result.posts = shaped.posts;
+      result.note = shaped.note;
+    }
 
     // Optionally fetch subreddit info
     if (params.include_subreddit_info) {
