@@ -1161,6 +1161,53 @@ RSS_HARDENING_RESULT=$(node --input-type=module -e '
 ' 2>/dev/null)
 assert "RSS hardening: bestof link target kept, body-anchor hijack blocked, 429 retry, JSON-skip memo" "echo \"\$RSS_HARDENING_RESULT\" | grep -q '^pass$'"
 
+# --------------------------------------------------------------------------
+# 2u. Auth Privacy: env creds never persisted, custom UA honored (auth.ts) — NEW
+# --------------------------------------------------------------------------
+log_subsection "2u. Auth Privacy — NEW"
+
+AUTH_PRIVACY_RESULT=$(HOME="$(mktemp -d)" REDDIT_CLIENT_ID="testid" REDDIT_CLIENT_SECRET="testsecret" REDDIT_USER_AGENT="CustomUA/1.0" node --input-type=module -e '
+  import { AuthManager } from "./dist/core/auth.js";
+  import { existsSync } from "node:fs";
+  import { readFile } from "node:fs/promises";
+  import { join } from "node:path";
+  import { homedir } from "node:os";
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ access_token: "tok123456789abcdef-mock", token_type: "bearer", expires_in: 3600, scope: "*" }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const authFile = join(homedir(), ".reddit-mcp-buddy", "auth.json");
+
+  // Env-supplied credentials: token refresh must NOT write auth.json
+  // (README privacy contract: env vars are never persisted by this server)
+  const am = new AuthManager();
+  await am.load();
+  await am.refreshAccessToken();
+  const t1 = !existsSync(authFile);
+  const t2 = am.isAuthenticated() === true;
+
+  // REDDIT_USER_AGENT must reach the actual request headers
+  const h = await am.getHeaders();
+  const t3 = h["User-Agent"] === "CustomUA/1.0";
+
+  // --auth-style setup (config set directly, no load()) must STILL persist,
+  // and never with the password
+  const am2 = new AuthManager();
+  am2["config"] = { clientId: "a", clientSecret: "b", username: "u", password: "p", userAgent: "X/1" };
+  await am2.refreshAccessToken();
+  const t4 = existsSync(authFile);
+  const saved = t4 ? JSON.parse(await readFile(authFile, "utf8")) : {};
+  const t5 = t4 && !("password" in saved);
+
+  // Anonymous (no creds): default UA
+  const am3 = new AuthManager();
+  const h3 = await am3.getHeaders();
+  const t6 = h3["User-Agent"] === "RedditBuddy/1.0 (by /u/karanb192)";
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6}));
+' 2>/dev/null)
+assert "Auth privacy: env creds never hit disk, --auth persists sans password, custom UA honored" "echo \"\$AUTH_PRIVACY_RESULT\" | grep -q '^pass$'"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

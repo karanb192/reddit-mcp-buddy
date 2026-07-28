@@ -30,6 +30,10 @@ const OAuthTokenResponseSchema = z.object({
 export class AuthManager {
   private config: AuthConfig | null = null;
   private configPath: string;
+  // True when credentials came from environment variables. Env-supplied
+  // credentials are never persisted to auth.json — only the --auth
+  // interactive setup (which never calls load()) opts into disk storage.
+  private configFromEnv = false;
   // Lock for token refresh to prevent concurrent refresh attempts (race conditions)
   private tokenRefreshPromise: Promise<void> | null = null;
   // Token expiration buffer (refresh 10 seconds before actual expiration to handle clock drift)
@@ -47,6 +51,7 @@ export class AuthManager {
     const envConfig = this.loadFromEnv();
     if (envConfig) {
       this.config = envConfig;
+      this.configFromEnv = true;
       return this.config;
     }
 
@@ -333,12 +338,17 @@ export class AuthManager {
       this.config.expiresAt = expiresAt;
       this.config.scope = data.scope;
 
-      // Never save password to disk
-      const configToSave = { ...this.config };
-      delete configToSave.password;
+      // Persist the refreshed token only for file-based (--auth) setups.
+      // Env-supplied credentials stay in memory: writing them to auth.json
+      // would break the documented "env vars are never persisted" contract.
+      if (!this.configFromEnv) {
+        // Never save password to disk
+        const configToSave = { ...this.config };
+        delete configToSave.password;
 
-      // Save updated config
-      await this.save(configToSave);
+        // Save updated config
+        await this.save(configToSave);
+      }
     } catch (error) {
       throw new Error(`Failed to refresh access token: ${error}`);
     }
@@ -363,7 +373,7 @@ export class AuthManager {
    */
   async getHeaders(): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
-      'User-Agent': 'RedditBuddy/1.0 (by /u/karanb192)',
+      'User-Agent': this.config?.userAgent || 'RedditBuddy/1.0 (by /u/karanb192)',
       'Accept': 'application/json',
       'Accept-Language': 'en-US,en;q=0.9',
       'Cache-Control': 'no-cache'
