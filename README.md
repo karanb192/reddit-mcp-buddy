@@ -4,7 +4,6 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - browse subreddits with no API keys; add free Reddit credentials for search, comments, user analysis, and full metrics.
 
-[![MCP Registry](https://img.shields.io/npm/v/reddit-mcp-buddy?label=MCP%20Registry&color=blue)](https://registry.modelcontextprotocol.io)
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![npm downloads](https://img.shields.io/npm/dm/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![GitHub stars](https://img.shields.io/github/stars/karanb192/reddit-mcp-buddy.svg?style=flat&logo=github&color=brightgreen)](https://github.com/karanb192/reddit-mcp-buddy/stargazers)
@@ -22,7 +21,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## Table of Contents
 
-- [What makes Reddit MCP Buddy different?](#what-makes-reddit-buddy-different)
+- [What makes Reddit MCP Buddy different?](#what-makes-reddit-mcp-buddy-different)
 - [Quick Start](#quick-start-30-seconds)
 - [What can it do?](#what-can-it-do)
 - [Available Tools](#available-tools)
@@ -194,7 +193,7 @@ Reddit MCP Buddy supports three authentication levels, each with different rate 
 | **Authenticated** | 100 req/min | All 4 credentials | Heavy usage, automation |
 
 #### How It Works:
-- **Anonymous Mode**: Default mode, no setup required. Only `browse_subreddit` works — Reddit blocks the logged-out JSON API, so results come from Reddit's public RSS feed (`data_source: "rss"`) with engagement metrics and NSFW flags as `null`. Other tools require credentials.
+- **Anonymous Mode**: Default mode, no setup required. Only `browse_subreddit` (plus the offline `reddit_explain`) works: Reddit blocks the logged-out JSON API, so browse results come from Reddit's public RSS feed (`data_source: "rss"`) with engagement metrics and NSFW flags as `null`. The remaining tools require credentials.
 - **App-Only Mode**: Uses OAuth2 client credentials grant (works with both script and web apps)
 - **Authenticated Mode**: Uses OAuth2 password grant (requires script app type)
 
@@ -231,7 +230,7 @@ Reddit MCP Buddy is designed with privacy and transparency in mind. Here's how y
 ### Security Notes
 - **Read-Only Operations**: All tools are read-only - the server never posts, comments, or modifies any Reddit content
 - **Credential Safety**:
-  - OAuth tokens are stored in memory and refreshed automatically
+  - OAuth tokens are refreshed automatically and kept in memory; only `--auth` CLI setups also cache the token in `~/.reddit-mcp-buddy/auth.json` (file mode 600)
   - Client secrets are treated as sensitive and never logged
   - Use environment variables in Claude Desktop config for maximum security
 - **Open Source**: Full source code is available at https://github.com/karanb192/reddit-mcp-buddy for security auditing
@@ -294,6 +293,8 @@ REDDIT_BUDDY_PORT=8080 npx -y reddit-mcp-buddy --http
 
 **Note:** The server runs in stdio mode by default (for Claude Desktop). Use `--http` flag for testing with Postman MCP or direct API calls.
 
+## Installation Options
+
 ### Global Install
 ```bash
 npm install -g reddit-mcp-buddy
@@ -311,7 +312,10 @@ npm link
 
 ### Using Docker
 ```bash
-docker run -it karanb192/reddit-mcp-buddy
+git clone https://github.com/karanb192/reddit-mcp-buddy.git
+cd reddit-mcp-buddy
+docker build -t reddit-mcp-buddy .
+docker run -it reddit-mcp-buddy
 ```
 
 ### Claude Desktop Extension
@@ -331,13 +335,13 @@ cd reddit-mcp-buddy
 ./scripts/build-mcpb.sh
 ```
 
-**Note**: The Desktop Extension format is currently in preview (September 2025). Most users should use the standard npm installation method shown in [Quick Start](#quick-start-30-seconds).
+**Note**: Most users should use the standard npm installation method shown in [Quick Start](#quick-start-30-seconds).
 
 ## Comparison with Other Tools
 
 | Feature | Reddit MCP Buddy | Other MCP Tools |
 |---------|-------------|----------------|
-| **Zero Setup** | ✅ Works instantly | ❌ Requires API keys |
+| **Zero Setup** | ✅ Browse instantly; free keys unlock the rest | ❌ Keys required for everything |
 | **Max Rate Limit** | ✅ 100 req/min proven | ❓ Unverified claims |
 | **Language** | TypeScript/Node.js | Python (most) |
 | **Tools Count** | 5 (focused) | 8-10 (redundant) |
@@ -354,6 +358,8 @@ cd reddit-mcp-buddy
 | Anonymous | 10 | 15 min | None |
 | App-only | 60 | 5 min | Client ID + Secret |
 | Authenticated | 100 | 5 min | All credentials |
+
+*Cache TTL applies to subreddit listings. Post details (10 min), search results (10 min), and user profiles (15 min) use fixed TTLs in all modes.*
 
 ## Why Reddit MCP Buddy?
 
@@ -419,13 +425,13 @@ cd reddit-mcp-buddy
 node --version
 npm --version
 
-# Try with full npx path
-$(npm bin -g)/reddit-mcp-buddy
+# Try the full global-bin path
+$(npm prefix -g)/bin/reddit-mcp-buddy
 ```
 
 **Browsing works but search / comments / user analysis fail**
-- Without credentials only `browse_subreddit` works, served from Reddit's public RSS feed (no scores or comment counts)
-- Anonymous browsing can also hit Reddit's own RSS rate limit (HTTP 429)
+- Without credentials only `browse_subreddit` (served from Reddit's public RSS feed, no scores or comment counts) and the offline `reddit_explain` work
+- Anonymous browsing can also hit Reddit's own RSS rate limit (HTTP 429); the server retries automatically, but sustained throttling can still fail
 - Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
 
 **Rate limit errors**
@@ -453,7 +459,7 @@ $(npm bin -g)/reddit-mcp-buddy
 | `REDDIT_CLIENT_SECRET` | Reddit app secret | No | 60 req/min (with ID) |
 | `REDDIT_USERNAME` | Reddit account username | No | 100 req/min (with all 4) |
 | `REDDIT_PASSWORD` | Reddit account password | No | 100 req/min (with all 4) |
-| `REDDIT_USER_AGENT` | User agent string | No | - |
+| `REDDIT_USER_AGENT` | Custom user agent string (applies when credentials are configured) | No | - |
 
 #### Server Configuration
 | Variable | Description | Default |
@@ -469,7 +475,7 @@ $(npm bin -g)/reddit-mcp-buddy
 Reddit MCP Buddy includes intelligent caching to improve performance and reduce API calls:
 
 - **Memory Safe**: Hard limit of 50MB - won't affect your system performance
-- **Adaptive TTLs**: Hot posts (5min), New posts (2min), Top posts (30min)
+- **Per-Content TTLs**: Post details (10min), user profiles (15min), search results (10min); subreddit listings use the mode default (15min anonymous, 5min with credentials)
 - **LRU Eviction**: Automatically removes least-used data when approaching limits
 - **Hit Tracking**: Optimizes cache based on actual usage patterns
 
@@ -530,13 +536,13 @@ We keep things simple:
 
 ### Official MCP Resources
 - **[MCP Registry](https://registry.modelcontextprotocol.io)** - Official registry of MCP servers
-- **[MCP Specification](https://spec.modelcontextprotocol.io)** - Official Model Context Protocol specification
+- **[MCP Specification](https://modelcontextprotocol.io/specification/latest)** - Official Model Context Protocol specification
 - **[MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)** - SDK used to build this server
 - **[MCP Servers Repository](https://github.com/modelcontextprotocol/servers)** - Collection of official MCP server implementations
-- **[Awesome MCP Servers](https://github.com/modelcontextprotocol/awesome-mcp-servers)** - Community-curated list of MCP servers
+- **[Awesome MCP Servers](https://github.com/punkpeye/awesome-mcp-servers)** - Community-curated list of MCP servers
 
 ### Where to Find This Server
-- **[MCP Registry Direct Link](https://registry.modelcontextprotocol.io/v0/servers/5677b351-373d-4137-bc58-28f1ba0d105d)** - Direct API link to this server
+- **[MCP Registry API Link](https://registry.modelcontextprotocol.io/v0/servers?search=reddit-mcp-buddy)** - Direct API query for this server
 - **[MCP Registry Search](https://registry.modelcontextprotocol.io)** - Search for "reddit" to find all versions
 - **[NPM Package](https://www.npmjs.com/package/reddit-mcp-buddy)** - Install via npm/npx
 - **[GitHub Repository](https://github.com/karanb192/reddit-mcp-buddy)** - Source code and issues
@@ -546,9 +552,9 @@ We keep things simple:
 # Get all versions of reddit-mcp-buddy from the registry
 curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=reddit-mcp-buddy" | jq
 
-# Get just version numbers and UUIDs
+# Get just names, version numbers, and latest flag
 curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=reddit-mcp-buddy" | \
-  jq '.servers[] | {version, id: ._meta."io.modelcontextprotocol.registry/official".id}'
+  jq '.servers[] | {name: .server.name, version: .server.version, isLatest: ._meta."io.modelcontextprotocol.registry/official".isLatest}'
 ```
 
 ## License
