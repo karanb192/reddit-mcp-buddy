@@ -45,6 +45,14 @@ export class RedditAPI {
   private readonly MAX_BACKOFF_MS = 30000; // 30 second max backoff
   private readonly INITIAL_BACKOFF_MS = 100;
   private readonly BACKOFF_MULTIPLIER = 2;
+  // Set when the anonymous .json API is proven blocked for this IP: it
+  // returned 403 while the RSS fallback succeeded, so Reddit itself was
+  // reachable and the subreddit is public — the 403 can only be the
+  // IP-level policy block. While active, cache-miss browses skip the doomed
+  // .json probe (saves a rate-limit slot and ~0.5s per call). Time-limited
+  // so a network/IP change heals without a restart.
+  private anonJsonBlockedUntil = 0;
+  private readonly ANON_JSON_BLOCK_TTL_MS = 15 * 60 * 1000;
 
   constructor(options: RedditAPIOptions) {
     this.auth = options.authManager;
@@ -107,25 +115,37 @@ export class RedditAPI {
     // feed (.rss) still serves without auth, so fall back to it when we have
     // no token. Authenticated requests go to oauth.reddit.com and don't need this.
     let data: RedditListing<RedditPost>;
-    try {
-      data = await this.get<RedditListing<RedditPost>>(
-        `${endpoint}?${params.toString()}`
-      );
-      data.data._source = 'api';
-    } catch (error) {
-      if (this.auth.isAuthenticated()) {
-        throw error; // OAuth path should work; don't mask real failures
-      }
-      console.error(`⚠️ Anonymous .json failed (${error instanceof Error ? error.message : error}). Falling back to RSS feed.`);
+    if (!this.auth.isAuthenticated() && Date.now() < this.anonJsonBlockedUntil) {
+      // JSON recently proven blocked — go straight to RSS.
+      data = await this.browseSubredditViaRSS(subreddit, sort, { limit, time });
+    } else {
       try {
-        data = await this.browseSubredditViaRSS(subreddit, sort, { limit, time });
-      } catch (rssError) {
-        // Surface both failures so the cause is clear
-        throw new Error(
-          `Both the JSON API and the RSS fallback failed for r/${subreddit}. ` +
-          `API: ${error instanceof Error ? error.message : error}. ` +
-          `RSS: ${rssError instanceof Error ? rssError.message : rssError}`
+        data = await this.get<RedditListing<RedditPost>>(
+          `${endpoint}?${params.toString()}`
         );
+        data.data._source = 'api';
+      } catch (error) {
+        if (this.auth.isAuthenticated()) {
+          throw error; // OAuth path should work; don't mask real failures
+        }
+        console.error(`⚠️ Anonymous .json failed (${error instanceof Error ? error.message : error}). Falling back to RSS feed.`);
+        try {
+          data = await this.browseSubredditViaRSS(subreddit, sort, { limit, time });
+          // RSS worked while .json failed. Latch the skip only on the
+          // block's signature (403): a transient .json 500/timeout must not
+          // degrade the whole session, and a genuinely private/nonexistent
+          // subreddit can't reach here because its RSS feed fails too.
+          if ((error as { status?: number }).status === 403) {
+            this.anonJsonBlockedUntil = Date.now() + this.ANON_JSON_BLOCK_TTL_MS;
+          }
+        } catch (rssError) {
+          // Surface both failures so the cause is clear
+          throw new Error(
+            `Both the JSON API and the RSS fallback failed for r/${subreddit}. ` +
+            `API: ${error instanceof Error ? error.message : error}. ` +
+            `RSS: ${rssError instanceof Error ? rssError.message : rssError}`
+          );
+        }
       }
     }
 
@@ -152,7 +172,25 @@ export class RedditAPI {
       params.append('t', time);
     }
 
-    const xml = await this.getRSS(`/r/${subreddit}/${sort}/.rss?${params.toString()}`);
+    let xml: string;
+    try {
+      xml = await this.getRSS(`/r/${subreddit}/${sort}/.rss?${params.toString()}`);
+    } catch (error) {
+      // Once the JSON probe is skipped (anonJsonBlockedUntil), these errors
+      // reach the user directly — give them subreddit context instead of a
+      // bare "RSS feed request failed (NNN)".
+      const status = (error as { status?: number }).status;
+      if (status === 404) {
+        throw new Error(`Not found - r/${subreddit} does not exist or is inaccessible`);
+      }
+      if (status === 403) {
+        throw new Error(`Cannot access r/${subreddit} - it may be private, quarantined, or NSFW (Reddit's logged-out feed refuses NSFW subreddits)`);
+      }
+      if (status === 429) {
+        throw new Error(`Reddit rate-limited the RSS feed for r/${subreddit} (HTTP 429) - anonymous access has a small per-IP quota; wait a minute and try again`);
+      }
+      throw error;
+    }
     return this.parseAtomFeed(xml, subreddit);
   }
 
@@ -206,15 +244,24 @@ export class RedditAPI {
       const published = pick('published') || pick('updated');
       const created_utc = published ? Math.floor(Date.parse(published) / 1000) : 0;
 
-      // The decoded content HTML contains the external "[link]" anchor and,
-      // for self-posts, the post body. Extract the outbound URL; if it points
-      // back to the comments page, it's a text post.
+      // The decoded content HTML contains the post body (for self-posts)
+      // followed by Reddit's footer with the "[link]" anchor. Take the LAST
+      // "[link]" anchor: the footer comes after the body, so an anchor a
+      // self-post author crafted inside their own text can't shadow it.
       const contentHtml = this.decodeEntities(pick('content') || '');
-      const outboundMatch = contentHtml.match(/<a href="([^"]+)">\s*\[link\]/);
+      const linkAnchors = [...contentHtml.matchAll(/<a href="([^"]+)">\s*\[link\]/g)];
+      const outboundMatch = linkAnchors.length > 0 ? linkAnchors[linkAnchors.length - 1] : null;
       // Reddit double-escapes entities inside <content>, so the extracted href
       // needs a second decode (?a=1&amp;b=2 -> ?a=1&b=2), same as selftext below.
       const outboundUrl = outboundMatch ? this.decodeEntities(outboundMatch[1]) : '';
-      const is_self = !outboundUrl || outboundUrl.includes('/comments/');
+      // Self-posts' [link] anchor points back at the post's OWN page, so
+      // compare paths instead of matching any '/comments/' substring — link
+      // posts that target other Reddit threads (r/bestof, crossposts) must
+      // keep their real outbound URL.
+      const asPath = (u: string): string =>
+        u.replace(/^https?:\/\/[^/]+/, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+      const is_self =
+        !outboundUrl || (permalink !== '' && asPath(outboundUrl) === asPath(permalink));
       const url = is_self ? `https://www.reddit.com${permalink}` : outboundUrl;
 
       // Self-post body: strip the markdown div, cut at the "submitted by" footer.
@@ -265,7 +312,7 @@ export class RedditAPI {
    * Private: Fetch a Reddit RSS/Atom endpoint and return the raw XML text.
    * Uses the same rate limiter and timeout as the JSON path.
    */
-  private async getRSS(endpoint: string): Promise<string> {
+  private async getRSS(endpoint: string, retries: number = 2): Promise<string> {
     if (!this.rateLimiter.canMakeRequest()) {
       throw new Error(this.rateLimiter.getErrorMessage(this.auth.isAuthenticated()));
     }
@@ -282,8 +329,21 @@ export class RedditAPI {
       clearTimeout(timeoutId);
       this.rateLimiter.recordRequest();
 
+      // Reddit throttles the logged-out feed per-IP in short windows
+      // (~25-60s, advertised via Retry-After / x-ratelimit-reset). Retry
+      // transient failures like the JSON path does, honoring the server's
+      // requested wait.
+      if ((response.status === 429 || response.status === 503) && retries > 0) {
+        const waitMs =
+          this.getRetryAfterDelay(response) ??
+          this.getRateLimitResetDelay(response) ??
+          this.calculateBackoff(retries);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+        return this.getRSS(endpoint, retries - 1);
+      }
+
       if (!response.ok) {
-        throw new Error(`RSS feed request failed (${response.status})`);
+        throw this.httpError(`RSS feed request failed (${response.status})`, response.status);
       }
 
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
@@ -545,6 +605,17 @@ export class RedditAPI {
   }
 
   /**
+   * Private: Error carrying the HTTP status that caused it, so callers can
+   * distinguish failure classes (e.g. the anonymous 403 IP-block) without
+   * parsing message text.
+   */
+  private httpError(message: string, status: number): Error {
+    const err: Error & { status?: number } = new Error(message);
+    err.status = status;
+    return err;
+  }
+
+  /**
    * Private: Calculate exponential backoff with jitter
    */
   private calculateBackoff(retriesLeft: number): number {
@@ -586,6 +657,20 @@ export class RedditAPI {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Private: Delay until the rate-limit window resets, from Reddit's
+   * x-ratelimit-reset header (seconds until reset). The logged-out .rss
+   * endpoint sends this on 429s where Retry-After may be absent.
+   */
+  private getRateLimitResetDelay(response: Response): number | null {
+    const reset = response.headers.get('x-ratelimit-reset');
+    if (!reset) return null;
+    const seconds = parseFloat(reset);
+    if (isNaN(seconds) || seconds < 0) return null;
+    // +1s cushion so the retry lands inside the next window
+    return Math.min((seconds + 1) * 1000, this.MAX_BACKOFF_MS);
   }
 
   /**
@@ -693,34 +778,34 @@ export class RedditAPI {
           // Extract subreddit name from URL if possible
           const subredditMatch = endpoint.match(/\/r\/([^\/]+)/);
           const subredditName = subredditMatch ? subredditMatch[1] : 'resource';
-          throw new Error(`Not found - r/${subredditName} does not exist or is inaccessible`);
+          throw this.httpError(`Not found - r/${subredditName} does not exist or is inaccessible`, 404);
         }
         if (response.status === 403) {
           // For 403, try to determine if it's a non-existent subreddit or private
           const subredditMatch = endpoint.match(/\/r\/([^\/]+)/);
           const subredditName = subredditMatch ? subredditMatch[1] : null;
-          
+
           if (subredditName) {
             // Common issue: Reddit returns 403 for both non-existent and private subreddits
-            throw new Error(`Cannot access r/${subredditName} - it may be private, quarantined, or doesn't exist. Try a public subreddit like 'programming', 'technology', or 'news'`);
+            throw this.httpError(`Cannot access r/${subredditName} - it may be private, quarantined, or doesn't exist. Try a public subreddit like 'programming', 'technology', or 'news'`, 403);
           }
-          throw new Error('Access forbidden - the requested content may be private or restricted');
+          throw this.httpError('Access forbidden - the requested content may be private or restricted', 403);
         }
         if (response.status === 429) {
-          throw new Error('Rate limited by Reddit - please wait before trying again');
+          throw this.httpError('Rate limited by Reddit - please wait before trying again', 429);
         }
         if (response.status === 503) {
-          throw new Error('Reddit is temporarily unavailable - please try again later');
+          throw this.httpError('Reddit is temporarily unavailable - please try again later', 503);
         }
-        
+
         let errorText = '';
         try {
           errorText = await response.text();
         } catch {
           errorText = 'Unable to read error response';
         }
-        
-        throw new Error(`Reddit API error (${response.status}): ${errorText}`);
+
+        throw this.httpError(`Reddit API error (${response.status}): ${errorText}`, response.status);
       }
 
       // Try to parse JSON
