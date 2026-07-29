@@ -52,6 +52,10 @@ EXPOSE 3000
 
 # Set environment variables
 ENV REDDIT_BUDDY_HTTP=true
+# The server binds loopback by default. Inside a container that would make the
+# published port unreachable, so bind all interfaces here — the container
+# boundary (and whatever you publish with -p) is the real access control.
+ENV REDDIT_BUDDY_HOST=0.0.0.0
 ENV NODE_ENV=production
 
 # Use dumb-init to handle signals properly

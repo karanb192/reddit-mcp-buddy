@@ -1,6 +1,6 @@
 {
   "name": "reddit-mcp-buddy",
-  "version": "1.1.13",
+  "version": "1.1.14",
   "description": "Clean, LLM-optimized Reddit MCP server. Browse posts, search content, analyze users. No fluff, just Reddit data.",
   "main": "dist/index.js",
   "mcpName": "io.github.karanb192/reddit-mcp-buddy",
@@ -50,7 +50,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.5",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.24.6"
   },
@@ -58,11 +58,9 @@
     "@types/node": "^20.14.10",
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
-    "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^8.57.0",
     "tsx": "^4.16.2",
-    "typescript": "^5.5.3",
-    "vitest": "^3.2.4"
+    "typescript": "^5.5.3"
   },
   "files": [
     "dist",

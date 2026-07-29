@@ -126,6 +126,52 @@ skip_test() {
   echo -e "  ${YELLOW}⊘${NC} $description (skipped: $reason)"
 }
 
+# Reddit blocks the logged-out JSON API, so every tool except browse_subreddit
+# (which has the RSS fallback) legitimately cannot work without credentials.
+# Those checks SKIP when running anonymously instead of failing, so a red
+# integration run always means a real regression.
+if [ -n "${REDDIT_CLIENT_ID:-}" ] && [ -n "${REDDIT_CLIENT_SECRET:-}" ]; then
+  HAS_CREDS=1
+else
+  HAS_CREDS=0
+fi
+CRED_SKIP_REASON="requires Reddit credentials (Reddit blocks the anonymous JSON API)"
+
+assert_contains_authed() {
+  if [ "$HAS_CREDS" = "1" ]; then
+    assert_contains "$@"
+  else
+    skip_test "$1" "$CRED_SKIP_REASON"
+  fi
+}
+
+assert_authed() {
+  if [ "$HAS_CREDS" = "1" ]; then
+    assert "$@"
+  else
+    skip_test "$1" "$CRED_SKIP_REASON"
+  fi
+}
+
+# Reddit throttles the logged-out RSS feed per IP (roughly one uncached request
+# per 25-60s), and CI runners share heavily-used addresses. A throttled or
+# blocked response is an environment limitation, not a regression, so these
+# checks SKIP on that signal instead of failing the build.
+is_throttled() {
+  echo "$1" | grep -qE '429|[Rr]ate.limit|rate-limited|Both the JSON API and the RSS fallback failed|whoa there'
+}
+
+assert_contains_live() {
+  local description="$1"
+  local haystack="$2"
+  local needle="$3"
+  if is_throttled "$haystack"; then
+    skip_test "$description" "Reddit throttled the request (HTTP 429)"
+  else
+    assert_contains "$description" "$haystack" "$needle"
+  fi
+}
+
 # Rate limit aware wait
 rate_limit_guard() {
   API_CALLS=$((API_CALLS + 1))
@@ -290,10 +336,23 @@ assert "Unknown endpoint returns 404" "[ '$NOT_FOUND_CODE' = '404' ]"
 # --------------------------------------------------------------------------
 log_subsection "3c. CORS Headers"
 
+# The server never sends a wildcard Access-Control-Allow-Origin. A request
+# without an Origin (curl, Postman, MCP clients) gets the method/header
+# advertisements but no ACAO; a browser origin is echoed back only when it is
+# allow-listed, otherwise the request is refused outright.
 CORS_HEADERS=$(curl -s -I -X OPTIONS "http://localhost:${HTTP_PORT}/mcp" 2>/dev/null)
-assert_contains "CORS: Access-Control-Allow-Origin present" "$CORS_HEADERS" "Access-Control-Allow-Origin"
+assert_not_contains "CORS: no wildcard Access-Control-Allow-Origin" "$CORS_HEADERS" "Access-Control-Allow-Origin: *"
 assert_contains "CORS: Allows POST method" "$CORS_HEADERS" "POST"
 assert_contains "CORS: Exposes MCP-Session-Id" "$CORS_HEADERS" "MCP-Session-Id"
+
+CORS_EVIL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X OPTIONS -H "Origin: https://evil.example" "http://localhost:${HTTP_PORT}/mcp" 2>/dev/null)
+assert "CORS: unlisted browser origin refused with 403" "[ '$CORS_EVIL_CODE' = '403' ]"
+
+MCP_DELETE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "http://localhost:${HTTP_PORT}/mcp" 2>/dev/null)
+assert "Stateless /mcp rejects DELETE with 405 (cannot be shut down by a client)" "[ '$MCP_DELETE_CODE' = '405' ]"
+
+MCP_STILL_UP=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${HTTP_PORT}/health" 2>/dev/null)
+assert "Server still healthy after DELETE attempt" "[ '$MCP_STILL_UP' = '200' ]"
 
 # --------------------------------------------------------------------------
 # 3d. MCP Protocol: tools/list
@@ -307,16 +366,16 @@ for TOOL_NAME in browse_subreddit search_reddit get_post_details user_analysis r
   assert_contains "tools/list contains $TOOL_NAME" "$TOOLS_LIST" "$TOOL_NAME"
 done
 
-# Check readOnlyHint is set (NEW in v1.1.12)
+# readOnlyHint must sit under annotations - clients ignore it at the top level
 READONLY_COUNT=$(echo "$TOOLS_LIST" | node -e "
   let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
     const r=JSON.parse(d);
     const tools=r.result?.tools||[];
-    const count=tools.filter(t=>t.readOnlyHint===true).length;
+    const count=tools.filter(t=>t.annotations && t.annotations.readOnlyHint===true).length;
     console.log(count);
   });
 " 2>/dev/null)
-assert "All 5 tools have readOnlyHint=true (NEW)" "[ '$READONLY_COUNT' = '5' ]"
+assert "All 5 tools have annotations.readOnlyHint=true" "[ '$READONLY_COUNT' = '5' ]"
 
 # Check schemas have proper structure (NEW zodSchemaToMCPInputSchema)
 SCHEMA_CHECK=$(echo "$TOOLS_LIST" | node -e "
@@ -362,23 +421,23 @@ log_subsection "4a. browse_subreddit"
 # Test 1: Default hot sort
 rate_limit_guard
 BROWSE_HOT=$(call_tool "browse_subreddit" '{"subreddit":"technology","limit":3}')
-assert_contains "browse_subreddit: returns posts array" "$BROWSE_HOT" '"posts"'
-assert_contains "browse_subreddit: posts have id field" "$BROWSE_HOT" '"id"'
-assert_contains "browse_subreddit: posts have title field" "$BROWSE_HOT" '"title"'
-assert_contains "browse_subreddit: posts have score field" "$BROWSE_HOT" '"score"'
-assert_contains "browse_subreddit: posts have permalink field" "$BROWSE_HOT" '"permalink"'
-assert_contains "browse_subreddit: posts have subreddit field" "$BROWSE_HOT" '"subreddit"'
-assert_contains "browse_subreddit: total_posts field present" "$BROWSE_HOT" '"total_posts"'
+assert_contains_live "browse_subreddit: returns posts array" "$BROWSE_HOT" '"posts"'
+assert_contains_live "browse_subreddit: posts have id field" "$BROWSE_HOT" '"id"'
+assert_contains_live "browse_subreddit: posts have title field" "$BROWSE_HOT" '"title"'
+assert_contains_live "browse_subreddit: posts have score field" "$BROWSE_HOT" '"score"'
+assert_contains_live "browse_subreddit: posts have permalink field" "$BROWSE_HOT" '"permalink"'
+assert_contains_live "browse_subreddit: posts have subreddit field" "$BROWSE_HOT" '"subreddit"'
+assert_contains_live "browse_subreddit: total_posts field present" "$BROWSE_HOT" '"total_posts"'
 
 # Test 2: Top with time range
 rate_limit_guard
 BROWSE_TOP=$(call_tool "browse_subreddit" '{"subreddit":"science","sort":"top","time":"month","limit":2}')
-assert_contains "browse_subreddit top/month: returns posts" "$BROWSE_TOP" '"posts"'
+assert_contains_live "browse_subreddit top/month: returns posts" "$BROWSE_TOP" '"posts"'
 
 # Test 3: Special subreddit "all" with rising
 rate_limit_guard
 BROWSE_ALL=$(call_tool "browse_subreddit" '{"subreddit":"all","sort":"rising","limit":2}')
-assert_contains "browse_subreddit r/all rising: works" "$BROWSE_ALL" '"posts"'
+assert_contains_live "browse_subreddit r/all rising: works" "$BROWSE_ALL" '"posts"'
 
 # Test 4: NSFW filtering (default=false)
 assert_not_contains "browse_subreddit: NSFW filtered out by default" "$BROWSE_HOT" '"nsfw":true'
@@ -386,28 +445,28 @@ assert_not_contains "browse_subreddit: NSFW filtered out by default" "$BROWSE_HO
 # Test 5: Include subreddit info
 rate_limit_guard_double  # subreddit_info makes 2 internal API calls
 BROWSE_INFO=$(call_tool "browse_subreddit" '{"subreddit":"programming","limit":1,"include_subreddit_info":true}')
-assert_contains "browse_subreddit: subreddit_info present" "$BROWSE_INFO" '"subreddit_info"'
-assert_contains "browse_subreddit: subreddit_info has subscribers" "$BROWSE_INFO" '"subscribers"'
+assert_contains_authed "browse_subreddit: subreddit_info present" "$BROWSE_INFO" '"subreddit_info"'
+assert_contains_authed "browse_subreddit: subreddit_info has subscribers" "$BROWSE_INFO" '"subscribers"'
 
 # Test 6: r/ prefix stripping
 rate_limit_guard
 BROWSE_PREFIX=$(call_tool "browse_subreddit" '{"subreddit":"r/AskReddit","limit":1}')
-assert_contains "browse_subreddit: r/ prefix stripped correctly" "$BROWSE_PREFIX" '"posts"'
+assert_contains_live "browse_subreddit: r/ prefix stripped correctly" "$BROWSE_PREFIX" '"posts"'
 
 # Test 7: controversial sort
 rate_limit_guard
 BROWSE_CONTROVERSIAL=$(call_tool "browse_subreddit" '{"subreddit":"AskReddit","sort":"controversial","time":"week","limit":2}')
-assert_contains "browse_subreddit controversial sort: returns posts" "$BROWSE_CONTROVERSIAL" '"posts"'
+assert_contains_live "browse_subreddit controversial sort: returns posts" "$BROWSE_CONTROVERSIAL" '"posts"'
 
 # Test 8: new sort
 rate_limit_guard
 BROWSE_NEW=$(call_tool "browse_subreddit" '{"subreddit":"technology","sort":"new","limit":2}')
-assert_contains "browse_subreddit new sort: returns posts" "$BROWSE_NEW" '"posts"'
+assert_contains_live "browse_subreddit new sort: returns posts" "$BROWSE_NEW" '"posts"'
 
 # Test 9: special subreddit "popular"
 rate_limit_guard
 BROWSE_POPULAR=$(call_tool "browse_subreddit" '{"subreddit":"popular","limit":2}')
-assert_contains "browse_subreddit r/popular: works" "$BROWSE_POPULAR" '"posts"'
+assert_contains_live "browse_subreddit r/popular: works" "$BROWSE_POPULAR" '"posts"'
 
 # --------------------------------------------------------------------------
 # 4b. search_reddit
@@ -416,33 +475,33 @@ log_subsection "4b. search_reddit"
 
 rate_limit_guard
 SEARCH_GLOBAL=$(call_tool "search_reddit" '{"query":"artificial intelligence","sort":"top","time":"week","limit":3}')
-assert_contains "search_reddit global: returns results" "$SEARCH_GLOBAL" '"results"'
-assert_contains "search_reddit global: has total_results" "$SEARCH_GLOBAL" '"total_results"'
+assert_contains_authed "search_reddit global: returns results" "$SEARCH_GLOBAL" '"results"'
+assert_contains_authed "search_reddit global: has total_results" "$SEARCH_GLOBAL" '"total_results"'
 
 # Multi-subreddit search with Promise.allSettled (NEW)
 rate_limit_guard_double  # 2 parallel subreddit searches
 SEARCH_MULTI=$(call_tool "search_reddit" '{"query":"python","subreddits":["programming","learnprogramming"],"limit":4}')
-assert_contains "search_reddit multi-subreddit (NEW allSettled): returns results" "$SEARCH_MULTI" '"results"'
+assert_contains_authed "search_reddit multi-subreddit (NEW allSettled): returns results" "$SEARCH_MULTI" '"results"'
 
 # Multi-subreddit with one invalid subreddit (NEW - failure tolerance)
 rate_limit_guard_double  # 2 parallel subreddit searches (one will 404)
-SEARCH_PARTIAL=$(call_tool "search_reddit" '{"query":"test","subreddits":["programming","thisdoesnotexist99999xyz"],"limit":4}')
-assert_contains "search_reddit partial failure (NEW): still returns results" "$SEARCH_PARTIAL" '"results"'
+SEARCH_PARTIAL=$(call_tool "search_reddit" '{"query":"test","subreddits":["programming","thisdoesnotexist9999"],"limit":4}')
+assert_contains_authed "search_reddit partial failure (NEW): still returns results" "$SEARCH_PARTIAL" '"results"'
 
 # Single subreddit search
 rate_limit_guard
 SEARCH_SINGLE=$(call_tool "search_reddit" '{"query":"python tutorial","subreddits":["learnprogramming"],"sort":"new","limit":3}')
-assert_contains "search_reddit single subreddit: returns results" "$SEARCH_SINGLE" '"results"'
+assert_contains_authed "search_reddit single subreddit: returns results" "$SEARCH_SINGLE" '"results"'
 
 # Sort by comments
 rate_limit_guard
 SEARCH_COMMENTS=$(call_tool "search_reddit" '{"query":"best programming language","sort":"comments","time":"month","limit":3}')
-assert_contains "search_reddit sort=comments: returns results" "$SEARCH_COMMENTS" '"results"'
+assert_contains_authed "search_reddit sort=comments: returns results" "$SEARCH_COMMENTS" '"results"'
 
 # Author filter (test with a known prolific user)
 rate_limit_guard
 SEARCH_AUTHOR=$(call_tool "search_reddit" '{"query":"reddit","author":"spez","sort":"new","limit":5}')
-assert_contains "search_reddit author filter: returns results" "$SEARCH_AUTHOR" '"results"'
+assert_contains_authed "search_reddit author filter: returns results" "$SEARCH_AUTHOR" '"results"'
 # Verify all returned results are by that author (if any results)
 AUTHOR_CHECK=$(echo "$SEARCH_AUTHOR" | node -e "
   let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
@@ -452,12 +511,12 @@ AUTHOR_CHECK=$(echo "$SEARCH_AUTHOR" | node -e "
     console.log(allMatch ? 'pass' : 'fail');
   });
 " 2>/dev/null)
-assert "search_reddit author filter: all results match author" "[ '$AUTHOR_CHECK' = 'pass' ]"
+assert_authed "search_reddit author filter: all results match author" "[ '$AUTHOR_CHECK' = 'pass' ]"
 
 # Flair filter (search in a subreddit known to use flairs)
 rate_limit_guard
 SEARCH_FLAIR=$(call_tool "search_reddit" '{"query":"help","subreddits":["technology"],"flair":"Privacy","sort":"top","time":"year","limit":5}')
-assert_contains "search_reddit flair filter: returns results" "$SEARCH_FLAIR" '"results"'
+assert_contains_authed "search_reddit flair filter: returns results" "$SEARCH_FLAIR" '"results"'
 # Verify flair filtering worked (all results should have matching flair or be empty)
 FLAIR_CHECK=$(echo "$SEARCH_FLAIR" | node -e "
   let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
@@ -467,7 +526,7 @@ FLAIR_CHECK=$(echo "$SEARCH_FLAIR" | node -e "
     console.log(allMatch ? 'pass' : 'fail');
   });
 " 2>/dev/null)
-assert "search_reddit flair filter: results match flair" "[ '$FLAIR_CHECK' = 'pass' ]"
+assert_authed "search_reddit flair filter: results match flair" "[ '$FLAIR_CHECK' = 'pass' ]"
 
 # --------------------------------------------------------------------------
 # 4c. get_post_details
@@ -492,9 +551,9 @@ if [ -n "$POST_ID" ] && [ -n "$POST_SUB" ]; then
   # Test with post_id + subreddit (efficient, 1 API call)
   rate_limit_guard
   POST_DETAILS=$(call_tool "get_post_details" "{\"post_id\":\"${POST_ID}\",\"subreddit\":\"${POST_SUB}\",\"comment_limit\":3,\"max_top_comments\":2}")
-  assert_contains "get_post_details by ID+sub: has post field" "$POST_DETAILS" '"post"'
-  assert_contains "get_post_details by ID+sub: has top_comments" "$POST_DETAILS" '"top_comments"'
-  assert_contains "get_post_details by ID+sub: has total_comments" "$POST_DETAILS" '"total_comments"'
+  assert_contains_authed "get_post_details by ID+sub: has post field" "$POST_DETAILS" '"post"'
+  assert_contains_authed "get_post_details by ID+sub: has top_comments" "$POST_DETAILS" '"top_comments"'
+  assert_contains_authed "get_post_details by ID+sub: has total_comments" "$POST_DETAILS" '"total_comments"'
 
   # Test with URL format (NEW enhanced parser)
   POST_PERMALINK=$(echo "$BROWSE_HOT" | node -e "
@@ -507,49 +566,49 @@ if [ -n "$POST_ID" ] && [ -n "$POST_SUB" ]; then
   if [ -n "$POST_PERMALINK" ]; then
     rate_limit_guard
     POST_BY_URL=$(call_tool "get_post_details" "{\"url\":\"${POST_PERMALINK}\",\"comment_limit\":2,\"max_top_comments\":1}")
-    assert_contains "get_post_details by URL: has post field" "$POST_BY_URL" '"post"'
+    assert_contains_authed "get_post_details by URL: has post field" "$POST_BY_URL" '"post"'
   fi
 
   # Test comment sorting
   rate_limit_guard
   POST_TOP_SORT=$(call_tool "get_post_details" "{\"post_id\":\"${POST_ID}\",\"subreddit\":\"${POST_SUB}\",\"comment_sort\":\"top\",\"comment_limit\":3,\"max_top_comments\":2}")
-  assert_contains "get_post_details comment_sort=top: works" "$POST_TOP_SORT" '"top_comments"'
+  assert_contains_authed "get_post_details comment_sort=top: works" "$POST_TOP_SORT" '"top_comments"'
 
   # Test link extraction (EXISTING)
   rate_limit_guard
   POST_LINKS=$(call_tool "get_post_details" "{\"post_id\":\"${POST_ID}\",\"subreddit\":\"${POST_SUB}\",\"extract_links\":true,\"comment_limit\":5,\"max_top_comments\":2}")
-  assert_contains "get_post_details extract_links: has field" "$POST_LINKS" '"extracted_links"'
+  assert_contains_authed "get_post_details extract_links: has field" "$POST_LINKS" '"extracted_links"'
 
   # Test comment_depth parameter
   rate_limit_guard
   POST_DEPTH=$(call_tool "get_post_details" "{\"post_id\":\"${POST_ID}\",\"subreddit\":\"${POST_SUB}\",\"comment_depth\":1,\"comment_limit\":5,\"max_top_comments\":3}")
-  assert_contains "get_post_details comment_depth=1: works" "$POST_DEPTH" '"top_comments"'
+  assert_contains_authed "get_post_details comment_depth=1: works" "$POST_DEPTH" '"top_comments"'
 
   # Test comment_sort=new
   rate_limit_guard
   POST_NEW_SORT=$(call_tool "get_post_details" "{\"post_id\":\"${POST_ID}\",\"subreddit\":\"${POST_SUB}\",\"comment_sort\":\"new\",\"comment_limit\":3,\"max_top_comments\":2}")
-  assert_contains "get_post_details comment_sort=new: works" "$POST_NEW_SORT" '"top_comments"'
+  assert_contains_authed "get_post_details comment_sort=new: works" "$POST_NEW_SORT" '"top_comments"'
 
   # Test comment_sort=controversial
   rate_limit_guard
   POST_CONTR_SORT=$(call_tool "get_post_details" "{\"post_id\":\"${POST_ID}\",\"subreddit\":\"${POST_SUB}\",\"comment_sort\":\"controversial\",\"comment_limit\":3,\"max_top_comments\":2}")
-  assert_contains "get_post_details comment_sort=controversial: works" "$POST_CONTR_SORT" '"top_comments"'
+  assert_contains_authed "get_post_details comment_sort=controversial: works" "$POST_CONTR_SORT" '"top_comments"'
 
   # Test comment_sort=qa
   rate_limit_guard
   POST_QA_SORT=$(call_tool "get_post_details" "{\"post_id\":\"${POST_ID}\",\"subreddit\":\"${POST_SUB}\",\"comment_sort\":\"qa\",\"comment_limit\":3,\"max_top_comments\":2}")
-  assert_contains "get_post_details comment_sort=qa: works" "$POST_QA_SORT" '"top_comments"'
+  assert_contains_authed "get_post_details comment_sort=qa: works" "$POST_QA_SORT" '"top_comments"'
 
   # Test post_id only (no subreddit — triggers /api/info lookup for subreddit discovery)
   rate_limit_guard_double  # 2 API calls: /api/info + /comments
   POST_ID_ONLY=$(call_tool "get_post_details" "{\"post_id\":\"${POST_ID}\",\"comment_limit\":2,\"max_top_comments\":1}")
-  assert_contains "get_post_details post_id only (no subreddit): works" "$POST_ID_ONLY" '"post"'
+  assert_contains_authed "get_post_details post_id only (no subreddit): works" "$POST_ID_ONLY" '"post"'
 
   # Test _postid format (redd.it short URL output) — NEW: empty subreddit prefix
   rate_limit_guard_double  # /api/info + /comments
   POST_SHORT_ID="_${POST_ID}"
   POST_SHORT=$(call_tool "get_post_details" "{\"post_id\":\"${POST_SHORT_ID}\",\"comment_limit\":1,\"max_top_comments\":1}")
-  assert_contains "get_post_details _postid format (redd.it path): works" "$POST_SHORT" '"post"'
+  assert_contains_authed "get_post_details _postid format (redd.it path): works" "$POST_SHORT" '"post"'
 else
   skip_test "get_post_details tests" "Could not extract post ID from browse results"
 fi
@@ -561,28 +620,28 @@ log_subsection "4d. user_analysis"
 
 rate_limit_guard
 USER_ANALYSIS=$(call_tool "user_analysis" '{"username":"spez","posts_limit":3,"comments_limit":3,"time_range":"year","top_subreddits_limit":5}')
-assert_contains "user_analysis: has username" "$USER_ANALYSIS" '"username"'
-assert_contains "user_analysis: has karma object" "$USER_ANALYSIS" '"karma"'
-assert_contains "user_analysis: has accountAge" "$USER_ANALYSIS" '"accountAge"'
-assert_contains "user_analysis: has recentPosts" "$USER_ANALYSIS" '"recentPosts"'
-assert_contains "user_analysis: has recentComments" "$USER_ANALYSIS" '"recentComments"'
-assert_contains "user_analysis: has topSubreddits" "$USER_ANALYSIS" '"topSubreddits"'
+assert_contains_authed "user_analysis: has username" "$USER_ANALYSIS" '"username"'
+assert_contains_authed "user_analysis: has karma object" "$USER_ANALYSIS" '"karma"'
+assert_contains_authed "user_analysis: has accountAge" "$USER_ANALYSIS" '"accountAge"'
+assert_contains_authed "user_analysis: has recentPosts" "$USER_ANALYSIS" '"recentPosts"'
+assert_contains_authed "user_analysis: has recentComments" "$USER_ANALYSIS" '"recentComments"'
+assert_contains_authed "user_analysis: has topSubreddits" "$USER_ANALYSIS" '"topSubreddits"'
 
 # Test with posts_limit=0 (only comments — verifies comments-only path)
 rate_limit_guard
 USER_COMMENTS_ONLY=$(call_tool "user_analysis" '{"username":"spez","posts_limit":0,"comments_limit":3,"time_range":"all"}')
-assert_contains "user_analysis posts_limit=0: still returns data" "$USER_COMMENTS_ONLY" '"username"'
-assert_contains "user_analysis posts_limit=0: has karma" "$USER_COMMENTS_ONLY" '"karma"'
+assert_contains_authed "user_analysis posts_limit=0: still returns data" "$USER_COMMENTS_ONLY" '"username"'
+assert_contains_authed "user_analysis posts_limit=0: has karma" "$USER_COMMENTS_ONLY" '"karma"'
 
 # Test with comments_limit=0 (only posts)
 rate_limit_guard
 USER_POSTS_ONLY=$(call_tool "user_analysis" '{"username":"spez","posts_limit":5,"comments_limit":0,"time_range":"all"}')
-assert_contains "user_analysis comments_limit=0: has recentPosts" "$USER_POSTS_ONLY" '"recentPosts"'
+assert_contains_authed "user_analysis comments_limit=0: has recentPosts" "$USER_POSTS_ONLY" '"recentPosts"'
 
 # Test time_range=day (likely triggers fallback to 'all' since spez may not post daily)
 rate_limit_guard
 USER_DAY=$(call_tool "user_analysis" '{"username":"spez","posts_limit":3,"comments_limit":0,"time_range":"day"}')
-assert_contains "user_analysis time_range=day: returns data" "$USER_DAY" '"username"'
+assert_contains_authed "user_analysis time_range=day: returns data" "$USER_DAY" '"username"'
 # Check if timeRangeNote appears (fallback behavior NEW in v1.1.12)
 USER_DAY_HAS_NOTE=$(echo "$USER_DAY" | node -e "
   let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
@@ -593,12 +652,12 @@ USER_DAY_HAS_NOTE=$(echo "$USER_DAY" | node -e "
     console.log((hasPosts || hasNote) ? 'pass' : 'fail');
   });
 " 2>/dev/null)
-assert "user_analysis time_range=day: either has posts or fallback note" "[ '$USER_DAY_HAS_NOTE' = 'pass' ]"
+assert_authed "user_analysis time_range=day: either has posts or fallback note" "[ '$USER_DAY_HAS_NOTE' = 'pass' ]"
 
 # Test time_range=week
 rate_limit_guard
 USER_WEEK=$(call_tool "user_analysis" '{"username":"spez","posts_limit":3,"comments_limit":0,"time_range":"week"}')
-assert_contains "user_analysis time_range=week: returns data" "$USER_WEEK" '"username"'
+assert_contains_authed "user_analysis time_range=week: returns data" "$USER_WEEK" '"username"'
 
 # --------------------------------------------------------------------------
 # 4e. reddit_explain
@@ -690,14 +749,14 @@ assert_contains "user_analysis nonexistent user: returns error" "$ERR_BAD_USER" 
 # Multi-subreddit search with nonexistent subreddits (Reddit search API returns empty, not 404)
 rate_limit_guard_double  # 2 parallel searches
 ERR_ALL_EMPTY=$(call_tool "search_reddit" '{"query":"test","subreddits":["nonexistent999aaa","nonexistent999bbb"],"limit":2}')
-assert_contains "search_reddit nonexistent subs: returns empty results gracefully" "$ERR_ALL_EMPTY" '"results"'
+assert_contains_authed "search_reddit nonexistent subs: returns empty results gracefully" "$ERR_ALL_EMPTY" '"results"'
 EMPTY_COUNT=$(echo "$ERR_ALL_EMPTY" | node -e "
   let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
     const o=JSON.parse(d);
     console.log(o.total_results === 0 ? 'pass' : 'fail');
   });
 " 2>/dev/null)
-assert "search_reddit nonexistent subs: total_results is 0" "[ '$EMPTY_COUNT' = 'pass' ]"
+assert_authed "search_reddit nonexistent subs: total_results is 0" "[ '$EMPTY_COUNT' = 'pass' ]"
 
 # --------------------------------------------------------------------------
 # 5c. Invalid URL Formats

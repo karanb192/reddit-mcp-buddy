@@ -8,6 +8,37 @@ on:
   workflow_dispatch:
 
 jobs:
+  version-parity:
+    name: Version Parity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # A release requires the same version in package.json, server.json
+      # (twice), manifest.json and SERVER_VERSION. Drift here ships a bundle
+      # that misreports itself, so fail the build instead of finding out after
+      # publishing.
+      - name: Check version fields agree
+        run: |
+          PKG=$(jq -r .version package.json)
+          SRV=$(jq -r .version server.json)
+          SRV_PKG=$(jq -r '.packages[0].version' server.json)
+          MAN=$(jq -r .version manifest.json)
+          CODE=$(grep -oE "SERVER_VERSION = '[^']+'" src/mcp-server.ts | cut -d"'" -f2)
+          BUNDLE=$(jq -r .version bundle.config.json)
+          echo "package.json=$PKG server.json=$SRV server.json:packages[0]=$SRV_PKG manifest.json=$MAN SERVER_VERSION=$CODE bundle.config.json=$BUNDLE"
+          FAILED=0
+          for pair in "server.json:$SRV" "server.json:packages[0]:$SRV_PKG" "manifest.json:$MAN" "src/mcp-server.ts SERVER_VERSION:$CODE" "bundle.config.json:$BUNDLE"; do
+            NAME=${pair%:*}; VAL=${pair##*:}
+            if [ "$VAL" != "$PKG" ]; then
+              echo "::error::$NAME is $VAL but package.json is $PKG"
+              FAILED=1
+            fi
+          done
+          [ "$FAILED" = "0" ] || exit 1
+
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -50,6 +81,8 @@ jobs:
       - name: Build package
         run: npm run build
 
+      # No continue-on-error: checks that genuinely need credentials skip
+      # themselves when none are configured, so a red run means a real
+      # regression rather than an environment limitation.
       - name: Run integration tests
         run: bash tests/test-integration.sh
-        continue-on-error: true

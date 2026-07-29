@@ -29,7 +29,7 @@ import {
 
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
-export const SERVER_VERSION = '1.1.13';
+export const SERVER_VERSION = '1.1.14';
 
 // MCP Response validation schemas (per MCP spec)
 const ContentBlockSchema = z.object({
@@ -123,8 +123,20 @@ function createValidatedResponse(text: string, isError: boolean = false): ToolRe
 /**
  * Create MCP server with proper protocol implementation
  */
-export async function createMCPServer() {
-  // Initialize core components
+export interface SharedServices {
+  cacheManager: CacheManager;
+  tools: RedditTools;
+  rateLimit: number;
+  cacheTTL: number;
+}
+
+/**
+ * Build the long-lived services (auth, cache, rate limiter, Reddit client).
+ * These are created ONCE per process and shared by every MCP server instance,
+ * so the stateless HTTP path can mint a fresh Server per request without
+ * throwing away the cache or resetting the rate limiter.
+ */
+export async function createSharedServices(): Promise<SharedServices> {
   const authManager = new AuthManager();
   await authManager.load();
 
@@ -145,30 +157,41 @@ export async function createMCPServer() {
     defaultTTL: disableCache ? 0 : cacheTTL,
     maxSize: disableCache ? 0 : 50 * 1024 * 1024, // 50MB or 0 if disabled
   });
-  
+
   // Create rate limiter
   const rateLimiter = new RateLimiter({
     limit: rateLimit,
     window: 60000, // 1 minute
     name: 'Reddit API',
   });
-  
+
   // Create Reddit API client
   const redditAPI = new RedditAPI({
     authManager,
     rateLimiter,
     cacheManager,
   });
-  
-  // Create tools instance
-  const tools = new RedditTools(redditAPI);
-  
+
+  return { cacheManager, tools: new RedditTools(redditAPI), rateLimit, cacheTTL };
+}
+
+export async function createMCPServer(shared?: SharedServices) {
+  const services = shared ?? await createSharedServices();
+  const { cacheManager, tools, rateLimit, cacheTTL } = services;
+
   // Create MCP server
   const server = new Server(
     {
       name: SERVER_NAME,
       version: SERVER_VERSION,
-      description: `Reddit content browser and analyzer. Access posts, comments, and user data from Reddit.
+    },
+    {
+      capabilities: {
+        tools: {},
+      },
+      // Guidance the client shows the model. This must be `instructions` —
+      // a `description` field on serverInfo is dropped by the protocol.
+      instructions: `Reddit content browser and analyzer. Access posts, comments, and user data from Reddit.
 
 KEY CONCEPTS:
 - Subreddits: Communities like "technology", "science". Use without r/ prefix
@@ -186,45 +209,41 @@ COMMON QUERIES:
 - "Analyze a Reddit user" → user_analysis with username
 
 Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.`,
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
     }
   );
-  
+
+
   // Generate tool definitions from Zod schemas with proper type conversion
   const toolDefinitions: Tool[] = [
     {
       name: 'browse_subreddit',
       description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising/controversial). Returns a post list with content, metadata, and a data_source field. With Reddit credentials (data_source "api") posts include score, num_comments, and upvote_ratio; without credentials, results come from Reddit\'s public RSS feed (data_source "rss") and those fields plus nsfw are null — see the response note and do not infer popularity from them.',
       inputSchema: zodSchemaToMCPInputSchema(browseSubredditSchema, 'browse_subreddit'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     },
     {
       name: 'search_reddit',
       description: 'Search for posts across Reddit or specific subreddits. Returns matching posts with content and metadata.',
       inputSchema: zodSchemaToMCPInputSchema(searchRedditSchema, 'search_reddit'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     },
     {
       name: 'get_post_details',
       description: 'Fetch a Reddit post with its comments. Requires EITHER url OR post_id. IMPORTANT: When using post_id alone, an extra API call is made to fetch the subreddit first (2 calls total). For better efficiency, always provide the subreddit parameter when known (1 call total).',
       inputSchema: zodSchemaToMCPInputSchema(getPostDetailsSchema, 'get_post_details'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     },
     {
       name: 'user_analysis',
       description: 'Analyze a Reddit user\'s posting history, karma, and activity patterns. Returns posts, comments, and statistics.',
       inputSchema: zodSchemaToMCPInputSchema(userAnalysisSchema, 'user_analysis'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     },
     {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
       inputSchema: zodSchemaToMCPInputSchema(redditExplainSchema, 'reddit_explain'),
-      readOnlyHint: true
+      annotations: { readOnlyHint: true }
     }
   ];
   
@@ -324,25 +343,63 @@ export async function startStdioServer() {
  * Start server with streamable HTTP transport for Postman MCP
  */
 export async function startHttpServer(port: number = 3000) {
-  const { server, cacheManager } = await createMCPServer();
-  
-  // Create transport - stateless mode for simpler setup
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined, // Stateless mode - no session management
-    enableJsonResponse: false // Use SSE for notifications
-  });
-  
-  // Connect MCP server to transport
-  await server.connect(transport);
-  
+  // Long-lived services (cache, rate limiter, Reddit client) are created once;
+  // the MCP Server and transport are created PER REQUEST below.
+  const shared = await createSharedServices();
+  const { cacheManager } = shared;
+
+  // Bind loopback by default. HTTP mode has no authentication, so exposing it
+  // on other interfaces must be an explicit, deliberate choice (e.g. Docker).
+  const host = (process.env.REDDIT_BUDDY_HOST || '127.0.0.1').trim();
+
+  // IPv6 literals need brackets in a Host header or URL (::1 -> [::1]).
+  const hostForUrl = host.includes(':') ? `[${host}]` : host;
+  const isLoopbackBind = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+
+  // Host allow-list for DNS-rebinding protection. Loopback binds get a safe
+  // built-in list. When the operator deliberately binds a routable interface
+  // (e.g. the Docker image sets 0.0.0.0), clients legitimately arrive with a
+  // container IP, service name or published port in the Host header, and
+  // pinning it protects nothing that the bind choice did not already concede -
+  // so honour REDDIT_BUDDY_ALLOWED_HOSTS if given, and otherwise skip the check
+  // rather than rejecting every real client.
+  const configuredHosts = (process.env.REDDIT_BUDDY_ALLOWED_HOSTS || '')
+    .split(',')
+    .map(h => h.trim())
+    .filter(Boolean);
+  const allowedHosts = configuredHosts.length > 0
+    ? configuredHosts
+    : (isLoopbackBind
+      ? [`${hostForUrl}:${port}`, `localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`]
+      : []);
+  const dnsRebindingProtection = allowedHosts.length > 0;
+
+  // Browsers may only reach this server from origins the operator allow-lists.
+  // Non-browser clients (Postman, curl, MCP clients) send no Origin header and
+  // are unaffected.
+  const allowedOrigins = (process.env.REDDIT_BUDDY_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+
   // Create HTTP server
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // Enable CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, MCP-Session-Id');
+    // CORS: echo back only allow-listed origins, never a wildcard. Without
+    // this, any website the user visits could drive their local MCP server.
+    const origin = req.headers.origin;
+    if (origin) {
+      if (!allowedOrigins.includes(origin)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Origin not allowed\n');
+        return;
+      }
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, MCP-Session-Id, MCP-Protocol-Version, Last-Event-ID');
     res.setHeader('Access-Control-Expose-Headers', 'MCP-Session-Id');
-    
+
     // Handle OPTIONS for CORS preflight
     if (req.method === 'OPTIONS') {
       res.writeHead(200);
@@ -360,8 +417,8 @@ export async function startHttpServer(port: number = 3000) {
         protocol: 'MCP',
         transport: 'streamable-http',
         features: {
-          sessions: true,
-          notifications: true,
+          sessions: false,
+          notifications: false,
           resumability: false
         }
       }));
@@ -420,6 +477,23 @@ export async function startHttpServer(port: number = 3000) {
           clearTimeout(dataTimeoutId);
           try {
             const parsedBody = JSON.parse(body);
+            // Fresh Server + transport per request. Sharing one stateless
+            // transport across clients causes cross-client response
+            // misrouting (GHSA-345p-7cg4-v4c7), and a client closing it
+            // would otherwise disable the endpoint for everyone.
+            const { server } = await createMCPServer(shared);
+            const transport = new StreamableHTTPServerTransport({
+              sessionIdGenerator: undefined, // Stateless mode - no session management
+              enableJsonResponse: false, // Use SSE for notifications
+              enableDnsRebindingProtection: dnsRebindingProtection,
+              ...(dnsRebindingProtection && { allowedHosts }),
+              ...(allowedOrigins.length > 0 && { allowedOrigins }),
+            });
+            res.on('close', () => {
+              transport.close().catch(() => {});
+              server.close().catch(() => {});
+            });
+            await server.connect(transport);
             await transport.handleRequest(req, res, parsedBody);
           } catch (error) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -438,8 +512,18 @@ export async function startHttpServer(port: number = 3000) {
           clearTimeout(dataTimeoutId);
         });
       } else {
-        // GET or DELETE requests
-        await transport.handleRequest(req, res);
+        // Stateless mode has no session to resume or terminate, so GET (SSE)
+        // and DELETE are not applicable. Reject them rather than handing them
+        // to a transport that would tear itself down.
+        res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'POST, OPTIONS' });
+        res.end(JSON.stringify({
+          jsonrpc: '2.0',
+          error: {
+            code: -32601,
+            message: `Method ${req.method} not supported on /mcp (stateless mode accepts POST only)`
+          },
+          id: null
+        }));
       }
       return;
     }
@@ -498,11 +582,17 @@ export async function startHttpServer(port: number = 3000) {
   });
 
   // Start listening
-  httpServer.listen(port, () => {
+  httpServer.listen(port, host, () => {
     console.error(`✅ Reddit MCP Buddy Server running (Streamable HTTP)`);
-    console.error(`🌐 Base URL: http://localhost:${port}`);
-    console.error(`📡 MCP endpoint: http://localhost:${port}/mcp`);
+    console.error(`🌐 Base URL: http://${hostForUrl}:${port}`);
+    console.error(`📡 MCP endpoint: http://${hostForUrl}:${port}/mcp`);
     console.error(`🔌 Connect with Postman MCP client`);
+    if (!isLoopbackBind) {
+      console.error(`⚠️  Bound to ${host} - this server has NO authentication. Only do this on a trusted network.`);
+      if (!dnsRebindingProtection) {
+        console.error(`   Set REDDIT_BUDDY_ALLOWED_HOSTS (comma-separated host:port) to restrict which Host headers are accepted.`);
+      }
+    }
     console.error('💡 Tip: Run "reddit-mcp-buddy --auth" for 10x more requests\n');
   });
 }

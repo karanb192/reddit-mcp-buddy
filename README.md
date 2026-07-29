@@ -468,7 +468,12 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 |----------|-------------|---------|
 | `REDDIT_BUDDY_HTTP` | Run as HTTP server instead of stdio | `false` |
 | `REDDIT_BUDDY_PORT` | HTTP server port (when HTTP=true) | `3000` |
+| `REDDIT_BUDDY_HOST` | Interface the HTTP server binds to | `127.0.0.1` |
+| `REDDIT_BUDDY_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the HTTP endpoint | none |
+| `REDDIT_BUDDY_ALLOWED_HOSTS` | Comma-separated `host:port` values accepted in the Host header (DNS-rebinding protection) | loopback values when bound to localhost |
 | `REDDIT_BUDDY_NO_CACHE` | Disable caching (always fetch fresh) | `false` |
+
+> **HTTP mode has no authentication.** It binds to localhost so only your machine can reach it, and rejects Host headers outside the loopback set. Setting `REDDIT_BUDDY_HOST=0.0.0.0` exposes it to your whole network - only do that on a trusted network (e.g. inside Docker, which sets it deliberately). On a non-loopback bind the Host check is off by default, since clients legitimately arrive with a container IP or service name; set `REDDIT_BUDDY_ALLOWED_HOSTS` to restrict it. Browser requests are rejected unless their origin is listed in `REDDIT_BUDDY_ALLOWED_ORIGINS`; non-browser clients like Postman are unaffected.
 
 ## Technical Details
 
