@@ -39,6 +39,19 @@ jobs:
           done
           [ "$FAILED" = "0" ] || exit 1
 
+      # The MCP registry rejects a description over 100 characters with a 422,
+      # and that step runs after npm publish and the GitHub release - so catch
+      # it here instead of half-way through a release.
+      - name: Check server.json description length
+        run: |
+          DESC=$(jq -r .description server.json)
+          LEN=${#DESC}
+          echo "server.json description: $LEN chars"
+          if [ "$LEN" -gt 100 ]; then
+            echo "::error::server.json description is $LEN chars; the MCP registry allows at most 100"
+            exit 1
+          fi
+
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
