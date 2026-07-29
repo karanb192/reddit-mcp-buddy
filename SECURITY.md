@@ -22,6 +22,6 @@ You can expect:
 
 ## Known Security Considerations
 
-**HTTP mode has no authentication.** When running with `REDDIT_BUDDY_HTTP=true`, the MCP server accepts requests from any client with no auth. This is intentional for local use — the server is designed to run on `localhost` only. Do not expose it on a public or shared network interface.
+**HTTP mode has no authentication.** When running with `REDDIT_BUDDY_HTTP=true`, the MCP server accepts requests from any client on the interface it binds with no auth. It therefore binds `127.0.0.1` by default, and rejects browser requests whose `Origin` is not listed in `REDDIT_BUDDY_ALLOWED_ORIGINS`. Setting `REDDIT_BUDDY_HOST` to another interface (as the Docker image does) exposes an unauthenticated server to that network - only do so on a network you trust, and never on a public one.
 
 **Reddit credentials** (client ID, secret, password) should be passed via environment variables, not committed to config files.

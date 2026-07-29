@@ -1208,6 +1208,139 @@ AUTH_PRIVACY_RESULT=$(HOME="$(mktemp -d)" REDDIT_CLIENT_ID="testid" REDDIT_CLIEN
 ' 2>/dev/null)
 assert "Auth privacy: env creds never hit disk, --auth persists sans password, custom UA honored" "echo \"\$AUTH_PRIVACY_RESULT\" | grep -q '^pass$'"
 
+# --------------------------------------------------------------------------
+# 2v. Identifier Validation: no path traversal into Reddit endpoints — NEW
+# --------------------------------------------------------------------------
+log_subsection "2v. Identifier Validation — NEW"
+
+IDENT_RESULT=$(node --input-type=module -e '
+  import { browseSubredditSchema, searchRedditSchema, getPostDetailsSchema, userAnalysisSchema } from "./dist/tools/index.js";
+
+  // Every identifier is interpolated into a Reddit API path, and authenticated
+  // requests carry the users OAuth bearer token — these must never accept a
+  // value that can escape /r/ or inject a query string.
+  const badSubs = ["../../api/v1/me", "programming/../../user/spez/about.json", "x?limit=1",
+                   "prog/hot.json?x=", "a".repeat(50), "../../../", "sub reddit", "", "a/b",
+                   "a".repeat(22), "+tech", "tech+", "u_bad-name/../x"];
+  const t1 = badSubs.every(s => !browseSubredditSchema.safeParse({ subreddit: s }).success);
+  const t2 = !userAnalysisSchema.safeParse({ username: "../../api/v1/me" }).success
+    && ["spez", "Adjective-Noun-1234", "a_b-c"].every(u => userAnalysisSchema.safeParse({ username: u }).success);
+  const t3 = !getPostDetailsSchema.safeParse({ post_id: "../../x" }).success;
+  const t4 = !searchRedditSchema.safeParse({ query: "x", subreddits: ["ok", "../../api/v1/me"] }).success;
+
+  // Legitimate values keep working, including the special listings and
+  // user-profile subreddits
+  // Profile subreddits carry the username verbatim, and modern Reddit
+  // usernames are Adjective-Noun-#### (hyphens, up to 20 chars). Multireddit
+  // paths (a+b) are served under /r/ too.
+  const t5 = ["all", "popular", "technology", "u_someone", "u_Adjective-Noun-1234",
+              "u_twenty_char_usernam", "technology+science", "AskReddit", "ab"]
+    .every(s => browseSubredditSchema.safeParse({ subreddit: s }).success);
+
+  // Prefixes are normalized rather than rejected
+  const t6 = browseSubredditSchema.parse({ subreddit: "r/technology" }).subreddit === "technology";
+  const t7 = userAnalysisSchema.parse({ username: "u/spez" }).username === "spez";
+  const t8 = getPostDetailsSchema.parse({ post_id: "t3_1abc2d3" }).post_id === "1abc2d3";
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8}));
+' 2>/dev/null)
+assert "Identifier validation: traversal/query-injection rejected, prefixes normalized" "echo \"\$IDENT_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2w. Cache Integrity: client-side filters must not mutate cached data — NEW
+# --------------------------------------------------------------------------
+log_subsection "2w. Cache Integrity — NEW"
+
+CACHE_INTEGRITY_RESULT=$(node --input-type=module -e '
+  import { AuthManager } from "./dist/core/auth.js";
+  import { RateLimiter } from "./dist/core/rate-limiter.js";
+  import { CacheManager } from "./dist/core/cache.js";
+  import { RedditAPI } from "./dist/services/reddit-api.js";
+  import { RedditTools } from "./dist/tools/index.js";
+
+  const mk = () => {
+    const api = new RedditAPI({
+      authManager: new AuthManager(),
+      rateLimiter: new RateLimiter({ limit: 100, window: 60000, name: "test" }),
+      cacheManager: new CacheManager({ defaultTTL: 60000, maxSize: 5000000 }),
+    });
+    return new RedditTools(api);
+  };
+  const listing = (n) => ({ kind: "Listing", data: { after: null, before: null, children:
+    Array.from({ length: n }, (_, i) => ({ kind: "t3", data: {
+      id: "p" + i, title: "t" + i, author: i === 0 ? "alice" : "bob", score: 1, num_comments: 0,
+      created_utc: 1, url: "u", permalink: "/p", subreddit: "test", is_self: false,
+      over_18: i === 1, link_flair_text: i === 0 ? "News" : "Other" } })) } });
+
+  globalThis.fetch = async () => new Response(JSON.stringify(listing(5)), { status: 200, headers: { "content-type": "application/json" } });
+
+  // search: the cache key excludes author/flair, so filtering must not shrink
+  // the cached listing for later unfiltered callers
+  const t = mk();
+  const filtered = await t.searchReddit({ query: "q", sort: "relevance", time: "all", limit: 25, author: "alice" });
+  const unfiltered = await t.searchReddit({ query: "q", sort: "relevance", time: "all", limit: 25 });
+  const t1 = filtered.total_results === 1;
+  const t2 = unfiltered.total_results === 5;
+  // filter-after-limit shrinkage is disclosed rather than silent
+  const t3 = typeof filtered.filter_note === "string" && /limit/.test(filtered.filter_note);
+
+  // browse: same contract for the NSFW filter (key excludes include_nsfw)
+  const t4tools = mk();
+  const safe = await t4tools.browseSubreddit({ subreddit: "test", sort: "hot", limit: 25, include_nsfw: false });
+  const withNsfw = await t4tools.browseSubreddit({ subreddit: "test", sort: "hot", limit: 25, include_nsfw: true });
+  const t4 = safe.total_posts === 4 && withNsfw.total_posts === 5;
+
+  // null-shaped children must not crash the comment tree
+  const postL = { kind: "Listing", data: { children: [{ kind: "t3", data: { id: "a1", title: "T", author: "x", score: 1, num_comments: 1, created_utc: 1, url: "u", permalink: "/p", subreddit: "test", selftext: "", is_self: true } }] } };
+  const cmtL = { kind: "Listing", data: { children: [
+    { kind: "t1", data: { id: "c1", author: "a", body: "hi", score: 1, created_utc: 1, permalink: "/c" } },
+    { kind: "t1", data: null }, { kind: "more", data: { count: 5 } }] } };
+  globalThis.fetch = async () => new Response(JSON.stringify([postL, cmtL]), { status: 200, headers: { "content-type": "application/json" } });
+  let t5 = false;
+  try {
+    const r = await mk().getPostDetails({ post_id: "a1", subreddit: "test", comment_limit: 20, comment_sort: "best", comment_depth: 3, extract_links: false, max_top_comments: 5 });
+    t5 = r.total_comments === 1;
+  } catch { t5 = false; }
+
+  // an empty post listing yields a clear message, not a TypeError
+  globalThis.fetch = async () => new Response(JSON.stringify([{ kind: "Listing", data: { children: [] } }, { kind: "Listing", data: { children: [] } }]), { status: 200, headers: { "content-type": "application/json" } });
+  let t6 = false;
+  try {
+    await mk().getPostDetails({ post_id: "zz9", subreddit: "test", comment_limit: 20, comment_sort: "best", comment_depth: 3, extract_links: false, max_top_comments: 5 });
+  } catch (e) { t6 = !/Cannot read/.test(e.message) && /no post/i.test(e.message); }
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6}));
+' 2>/dev/null)
+assert "Cache integrity: filters do not mutate cached listings; null-shaped children survive" "echo \"\$CACHE_INTEGRITY_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2x. Tool Definition Shape: annotations + schema fidelity — NEW
+# --------------------------------------------------------------------------
+log_subsection "2x. Tool Definition Shape — NEW"
+
+TOOLDEF_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
+  import { createMCPServer } from "./dist/mcp-server.js";
+  const { handlers } = await createMCPServer();
+  const { tools } = await handlers["tools/list"]();
+
+  const t1 = tools.length === 5;
+  // readOnlyHint belongs under annotations; at the top level clients drop it
+  const t2 = tools.every(t => t.annotations && t.annotations.readOnlyHint === true);
+  const t3 = tools.every(t => t.readOnlyHint === undefined);
+  // input schemas must survive zod->JSON Schema conversion with real properties
+  const t4 = tools.every(t => t.inputSchema && t.inputSchema.type === "object" && Object.keys(t.inputSchema.properties || {}).length > 0);
+  const browse = tools.find(t => t.name === "browse_subreddit");
+  const t5 = browse.inputSchema.properties.subreddit.type === "string"
+    && typeof browse.inputSchema.properties.subreddit.description === "string"
+    && (browse.inputSchema.required || []).includes("subreddit");
+
+  const all = t1 && t2 && t3 && t4 && t5;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5}));
+' 2>/dev/null)
+assert "Tool definitions: 5 tools, readOnlyHint under annotations, schemas intact" "echo \"\$TOOLDEF_RESULT\" | grep -q '^pass$'"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

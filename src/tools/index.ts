@@ -7,9 +7,27 @@ import { RedditAPI, RSS_UNKNOWN_SCORE } from '../services/reddit-api.js';
 import { ContentProcessor } from '../services/content-processor.js';
 import { RedditListing, RedditPost } from '../types/reddit.types.js';
 
+// Reddit identifier formats. These are security boundaries, not just
+// ergonomics: every value below is interpolated into a Reddit API path, and an
+// authenticated request carries the user's OAuth bearer token — so an
+// unconstrained string could steer that token to an arbitrary endpoint.
+// Plain names are [A-Za-z0-9_]{2,21}. Two extra legitimate shapes: profile
+// subreddits (u_<username>, and usernames may contain hyphens and run to 20
+// chars) and multireddit paths (a+b+c), both of which Reddit serves under /r/.
+const SUBREDDIT_RE = /^(?:[A-Za-z0-9_]{2,21}(?:\+[A-Za-z0-9_]{2,21})*|u_[A-Za-z0-9_-]{3,20})$/;
+const USERNAME_RE = /^[A-Za-z0-9_-]{3,20}$/;
+// Post IDs are base36; legacy posts have very short ids, modern ones up to 13.
+const POST_ID_RE = /^[A-Za-z0-9]{2,13}$/;
+
+const subredditName = (description: string) =>
+  z.string()
+    .transform(s => s.trim().replace(/^\/?r\//i, ''))
+    .refine(s => SUBREDDIT_RE.test(s), 'Subreddit must be 2-21 characters (letters, numbers, underscore) without the r/ prefix; u_<username> profile subreddits and a+b multireddits are also accepted')
+    .describe(description);
+
 // Tool schemas
 export const browseSubredditSchema = z.object({
-  subreddit: z.string().describe('Subreddit name without r/ prefix. Use specific subreddit (e.g., "technology"), "all" for Reddit-wide posts, or "popular" for trending across default subreddits'),
+  subreddit: subredditName('Subreddit name without r/ prefix. Use specific subreddit (e.g., "technology"), "all" for Reddit-wide posts, or "popular" for trending across default subreddits'),
   sort: z.enum(['hot', 'new', 'top', 'rising', 'controversial']).optional().default('hot'),
   time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional(),
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Change ONLY IF user specifies.'),
@@ -19,7 +37,7 @@ export const browseSubredditSchema = z.object({
 
 export const searchRedditSchema = z.object({
   query: z.string().describe('Search query'),
-  subreddits: z.array(z.string()).optional().describe('Subreddits to search in (leave empty for all)'),
+  subreddits: z.array(subredditName('Subreddit name without r/ prefix')).max(10).optional().describe('Subreddits to search in, max 10 (leave empty for all)'),
   sort: z.enum(['relevance', 'hot', 'top', 'new', 'comments']).optional().default('relevance'),
   time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional().default('all'),
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Override ONLY IF user requests.'),
@@ -28,8 +46,12 @@ export const searchRedditSchema = z.object({
 });
 
 export const getPostDetailsSchema = z.object({
-  post_id: z.string().optional().describe('Reddit post ID (e.g., "1abc2d3")'),
-  subreddit: z.string().optional().describe('Subreddit name (optional with post_id, but more efficient if provided)'),
+  post_id: z.string()
+    .transform(s => s.trim().replace(/^t3_/i, ''))
+    .refine(s => POST_ID_RE.test(s), 'Post ID must be 2-13 alphanumeric characters (e.g. "1abc2d3"), with or without the t3_ prefix')
+    .optional()
+    .describe('Reddit post ID (e.g., "1abc2d3")'),
+  subreddit: subredditName('Subreddit name (optional with post_id, but more efficient if provided)').optional(),
   url: z.string().optional().describe('Full Reddit URL (alternative to post_id)'),
   comment_limit: z.number().min(1).max(500).optional().default(20).describe('Default 20, range (1-500). Change ONLY IF user asks.'),
   comment_sort: z.enum(['best', 'top', 'new', 'controversial', 'qa']).optional().default('best'),
@@ -39,7 +61,10 @@ export const getPostDetailsSchema = z.object({
 });
 
 export const userAnalysisSchema = z.object({
-  username: z.string().describe('Reddit username'),
+  username: z.string()
+    .transform(s => s.trim().replace(/^\/?u(?:ser)?\//i, ''))
+    .refine(s => USERNAME_RE.test(s), 'Username must be 3-20 characters (letters, numbers, underscore, hyphen), without the u/ prefix')
+    .describe('Reddit username without u/ prefix'),
   posts_limit: z.number().min(0).max(100).optional().default(10).describe('Default 10, range (0-100). Change ONLY IF user specifies.'),
   comments_limit: z.number().min(0).max(100).optional().default(10).describe('Default 10, range (0-100). Override ONLY IF user asks.'),
   time_range: z.enum(['day', 'week', 'month', 'year', 'all']).optional().default('month').describe('Time range for posts/comments (default: month). Note: When set to values other than "all", posts are sorted by top scores within that period. When set to "all", posts are sorted by newest'),
@@ -97,14 +122,15 @@ export class RedditTools {
 
     // Filter NSFW content unless requested. RSS-sourced posts carry no
     // over_18 flag and pass through — disclosed via the note in shapeRssPosts.
-    if (!params.include_nsfw) {
-      listing.data.children = listing.data.children.filter(
-        child => !child.data.over_18
-      );
-    }
+    // Filter into a NEW array: `listing` is the cached object by reference, so
+    // reassigning its children would shrink the shared cache entry (the cache
+    // key does not include include_nsfw).
+    const children = listing.data.children.filter(
+      child => child.data && (params.include_nsfw || !child.data.over_18)
+    );
 
     // Extract just the essential fields from Reddit's verbose response
-    const posts = listing.data.children.map(child => ({
+    const posts = children.map(child => ({
       id: child.data.id,
       title: child.data.title,
       author: child.data.author,
@@ -227,22 +253,31 @@ export class RedditTools {
       });
     }
 
+    // Client-side filters. These build NEW arrays: `results` is the cached
+    // object by reference and the cache key excludes author/flair, so
+    // reassigning its children would serve the filtered subset to every later
+    // caller of the same query.
+    let children = results.data.children;
+    const unfilteredCount = children.length;
+
     // Filter by author if specified
     if (params.author) {
-      results.data.children = results.data.children.filter(
-        child => child.data.author.toLowerCase() === params.author!.toLowerCase()
+      const author = params.author.replace(/^\/?u\//i, '').toLowerCase();
+      children = children.filter(
+        child => child.data.author?.toLowerCase() === author
       );
     }
 
     // Filter by flair if specified
     if (params.flair) {
-      results.data.children = results.data.children.filter(
-        child => child.data.link_flair_text?.toLowerCase().includes(params.flair!.toLowerCase())
+      const flair = params.flair.toLowerCase();
+      children = children.filter(
+        child => child.data.link_flair_text?.toLowerCase().includes(flair)
       );
     }
 
     // Extract just the essential fields from Reddit's verbose response
-    const posts = results.data.children.map(child => ({
+    const posts = children.map(child => ({
       id: child.data.id,
       title: child.data.title,
       author: child.data.author,
@@ -260,10 +295,19 @@ export class RedditTools {
       link_flair_text: child.data.link_flair_text,
     }));
 
-    return {
+    const result: any = {
       results: posts,
       total_results: posts.length
     };
+
+    // Author/flair are applied locally, AFTER Reddit truncated the response to
+    // `limit`. Say so, otherwise a short result list reads as "few matches
+    // exist" rather than "few matches were in the first page".
+    if ((params.author || params.flair) && posts.length < unfilteredCount) {
+      result.filter_note = `${unfilteredCount} posts matched the query; ${posts.length} remained after applying the ${[params.author && 'author', params.flair && 'flair'].filter(Boolean).join(' and ')} filter locally. Reddit applies the limit before this filter, so more matches may exist beyond the first ${unfilteredCount} results.`;
+    }
+
+    return result;
   }
 
   async getPostDetails(params: z.infer<typeof getPostDetailsSchema>) {
@@ -287,7 +331,11 @@ export class RedditTools {
       depth: params.comment_depth,
     });
 
-    const post = postListing.data.children[0].data;
+    const postChild = postListing.data.children?.[0];
+    if (!postChild?.data) {
+      throw new Error('Reddit returned no post for that id - it may be removed, quarantined, or withheld in your region');
+    }
+    const post = postChild.data;
 
     // Extract essential post fields
     const cleanPost = {
@@ -325,7 +373,9 @@ export class RedditTools {
     const buildCommentTree = (listing: typeof commentsListing): CommentNode[] => {
       const nodes: CommentNode[] = [];
       for (const child of listing.data.children) {
-        if (child.kind !== 't1') continue;
+        // Reddit sends {kind:'t1', data:null} for some removed comments, and
+        // 'more' stubs are not comments at all.
+        if (child.kind !== 't1' || !child.data) continue;
         const c = child.data;
         const node: CommentNode = {
           id: c.id,

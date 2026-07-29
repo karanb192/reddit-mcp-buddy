@@ -107,7 +107,7 @@ export class RedditAPI {
     }
 
     // All subreddits use /r/ prefix
-    const endpoint = `/r/${subreddit}/${sort}.json`;
+    const endpoint = `/r/${encodeURIComponent(subreddit)}/${sort}.json`;
 
     // Make request, with a credential-free RSS fallback.
     // Reddit network-blocks the unauthenticated .json API from many IPs
@@ -174,7 +174,7 @@ export class RedditAPI {
 
     let xml: string;
     try {
-      xml = await this.getRSS(`/r/${subreddit}/${sort}/.rss?${params.toString()}`);
+      xml = await this.getRSS(`/r/${encodeURIComponent(subreddit)}/${sort}/.rss?${params.toString()}`);
     } catch (error) {
       // Once the JSON probe is skipped (anonJsonBlockedUntil), these errors
       // reach the user directly — give them subreddit context instead of a
@@ -397,7 +397,7 @@ export class RedditAPI {
       // Handle short URLs (redd.it) where subreddit is empty - fall through to lookup
       if (!subreddit) {
         const infoData = await this.get<RedditListing<RedditPost>>(
-          `/api/info.json?id=t3_${id}`
+          `/api/info.json?id=t3_${encodeURIComponent(id)}`
         );
         if (!infoData.data.children.length) {
           throw new Error(`Post with ID ${id} not found`);
@@ -410,7 +410,7 @@ export class RedditAPI {
 
       // Fetch post info to get subreddit
       const infoData = await this.get<RedditListing<RedditPost>>(
-        `/api/info.json?id=t3_${id}`
+        `/api/info.json?id=t3_${encodeURIComponent(id)}`
       );
 
       if (!infoData.data.children.length) {
@@ -435,7 +435,7 @@ export class RedditAPI {
     });
 
     const data = await this.get<[RedditListing<RedditPost>, RedditListing<RedditComment>]>(
-      `/r/${subreddit}/comments/${id}.json?${params.toString()}`
+      `/r/${encodeURIComponent(subreddit)}/comments/${encodeURIComponent(id)}.json?${params.toString()}`
     );
 
     this.cache.set(cacheKey, data);
@@ -487,7 +487,7 @@ export class RedditAPI {
     }
 
     const endpoint = subreddit 
-      ? `/r/${subreddit}/search.json`
+      ? `/r/${encodeURIComponent(subreddit)}/search.json`
       : '/search.json';
 
     const data = await this.get<RedditListing<RedditPost>>(
@@ -511,7 +511,7 @@ export class RedditAPI {
     }
 
     const data = await this.get<{ data: RedditUser }>(
-      `/user/${username}/about.json`
+      `/user/${encodeURIComponent(username)}/about.json`
     );
 
     const user = data.data;
@@ -549,7 +549,7 @@ export class RedditAPI {
     });
 
     const data = await this.get<RedditListing<RedditPost | RedditComment>>(
-      `/user/${username}/${type}.json?${params.toString()}`
+      `/user/${encodeURIComponent(username)}/${type}.json?${params.toString()}`
     );
 
     this.cache.set(cacheKey, data);
@@ -569,7 +569,7 @@ export class RedditAPI {
     }
 
     const data = await this.get<{ data: RedditSubreddit }>(
-      `/r/${name}/about.json`
+      `/r/${encodeURIComponent(name)}/about.json`
     );
 
     const subreddit = data.data;

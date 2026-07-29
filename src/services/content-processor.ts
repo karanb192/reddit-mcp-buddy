@@ -378,7 +378,7 @@ export class ContentProcessor {
     // Analyze posting patterns
     const subredditActivity = new Map<string, { posts: number; karma: number }>();
     
-    posts.data.children.forEach(child => {
+    posts.data.children.filter(child => child.data).forEach(child => {
       const item = child.data as any;
       const subreddit = item.subreddit || 'unknown';
       
@@ -402,6 +402,7 @@ export class ContentProcessor {
     
     // Process recent posts (already limited by API call)
     const recentPosts = posts.data.children
+      .filter(child => child.data)
       .map(child => {
         const post = child.data as RedditPost;
         return this.processPost(post);
@@ -410,7 +411,9 @@ export class ContentProcessor {
     // Process recent comments if provided
     let recentComments;
     if (options.comments && options.comments.data.children.length > 0) {
-      recentComments = options.comments.data.children.map(child => {
+      // Reddit sends {kind:'t1', data:null} for some removed comments; drop
+      // them rather than dereferencing null (same guard as the no-posts path).
+      recentComments = options.comments.data.children.filter(child => child.data).map(child => {
         const comment = child.data as any; // Reddit API returns additional fields
         return {
           id: comment.id,
