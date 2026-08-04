@@ -58,3 +58,4 @@ CLAUDE.md
 
 # Desktop extension bundles
 *.mcpb
+.gstack/
