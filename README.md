@@ -1,5 +1,7 @@
 # <img src="assets/reddit-mcp-buddy-icon-white-background.png" width="48" align="center"/> Reddit MCP Buddy
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.karanb192%2Freddit-mcp-buddy.svg)](https://mcptoplist.com/server/io.github.karanb192%2Freddit-mcp-buddy)
+
 ### Reddit Browser for Claude Desktop and AI Assistants
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - browse subreddits with no API keys; add free Reddit credentials for search, comments, user analysis, and full metrics.
