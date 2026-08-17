@@ -41,7 +41,7 @@ const { WriteError, mapWriteError, mapWriteHttpError, redactWriteError } =
   await import(new URL('dist/services/write-errors.js', root));
 const {
   writeSubredditName, createPostSchema, addCommentSchema, subredditRulesSchema,
-  inferPostKind, resolveCommentTarget, parseCommentUrl, RedditWriteTools,
+  inferPostKind, resolveCommentTarget, parseCommentUrl, safeRegexTest, RedditWriteTools,
 } = await import(new URL('dist/tools/write.js', root));
 const { AuthManager } = await import(new URL('dist/core/auth.js', root));
 const { CacheManager } = await import(new URL('dist/core/cache.js', root));
@@ -84,6 +84,10 @@ const SUBS = {
                         title_regexes: ['[', '', '^\\['] } },
   bodyreq:    { about: { submission_type: 'any' }, reqs: { body_restriction_policy: 'required' } },
   nobody:     { about: { submission_type: 'any' }, reqs: { body_restriction_policy: 'notAllowed' } },
+  // Hostile mod-authored title_regexes (ReDoS guard fixtures)
+  redos:      { about: { submission_type: 'any' }, reqs: { title_regexes: ['^(a+)+$'] } },
+  longregex:  { about: { submission_type: 'any' }, reqs: { title_regexes: ['a'.repeat(1001)] } },
+  manyregex:  { about: { submission_type: 'any' }, reqs: { title_regexes: Array.from({ length: 12 }, () => 'Tag') } },
   flairreq:   { about: { submission_type: 'any' }, reqs: { is_flair_required: true },
                 flairs: [{ id: 'f1', text: 'News', text_editable: false, mod_only: false },
                          { id: 'fmod', text: 'Mod', text_editable: false, mod_only: true }] },
@@ -388,6 +392,11 @@ const confirm = { elicit: async () => 'confirmed' };
   t('B26 bearer and access_token scrubbed', !clean.includes('secret.bearer-token_value') && !clean.includes('another-secret-token'));
   t('B27 redaction marks what it scrubbed', clean.includes('[REDACTED]'));
   t('B28 clean text passes through unchanged', redactWriteError('nothing secret here') === 'nothing secret here');
+
+  // Unknown type/field are response text: only a short token shape is echoed
+  const hostile = mapWriteError([['X'.repeat(120) + ' wss://ws.example/x?m=SNEAKYTOKEN', 'msg', 'bad field!']]);
+  t('B29 oversized or non-token unknown type degrades to UNKNOWN', hostile.code === 'UNKNOWN' && !JSON.stringify(hostile).includes('SNEAKYTOKEN'));
+  t('B30 non-token unknown field is omitted from the message', !hostile.message.includes('field'));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -431,6 +440,8 @@ const confirm = { elicit: async () => 'confirmed' };
   t('C17 media passes the schema (rejected later by kind inference, not silently stripped)', createPostSchema.safeParse({ ...base, media: [{ name: 'x', path: '/x' }] }).success);
   t('C18 subreddit_rules uses the strict validator', !subredditRulesSchema.safeParse({ subreddit: 'all' }).success && subredditRulesSchema.safeParse({ subreddit: 'test' }).success);
   t('C19 add_comment text must be non-empty', !addCommentSchema.safeParse({ post_id: 'abc12', text: ' ' }).success && addCommentSchema.safeParse({ post_id: 'abc12', text: 'hi' }).success);
+  t('C19b add_comment text is NOT trimmed (indented code blocks stay intact)',
+    addCommentSchema.parse({ post_id: 'abc12', text: '    indented code\nsecond line' }).text === '    indented code\nsecond line');
 
   // Comment target resolution
   const res = (p) => { try { return resolveCommentTarget(p); } catch (e) { return 'err:' + e.message; } };
@@ -558,6 +569,21 @@ const confirm = { elicit: async () => 'confirmed' };
   // Restricted posting warns (cannot be verified for this account)
   const restrictedDry = await tools.createPost({ subreddit: 'restricted', title: 'title', body_markdown: 'b', validate_only: true });
   t('E24 restrict_posting surfaces a warning in the dry run', restrictedDry.warnings.some(w => w.includes('approved users only')));
+
+  // Bounded title-regex evaluation: mod-authored patterns can be hostile, so
+  // none may hang the event loop; unsafe ones degrade to warnings.
+  const redosStart = Date.now();
+  const redosDry = await tools.createPost({ subreddit: 'redos', title: 'a'.repeat(40) + 'b', body_markdown: 'b', validate_only: true });
+  t('E28 catastrophic title regex times out into a warning, never a hang',
+    Date.now() - redosStart < 5000 && redosDry.valid === true && redosDry.warnings.some(w => w.includes('timed out')));
+  const longDry = await tools.createPost({ subreddit: 'longregex', title: 'a plain title', body_markdown: 'b', validate_only: true });
+  t('E29 overlong title regex is skipped with a warning', longDry.valid === true && longDry.warnings.some(w => w.includes('too long to evaluate safely')));
+  const manyDry = await tools.createPost({ subreddit: 'manyregex', title: 'Tag title', body_markdown: 'b', validate_only: true });
+  t('E30 only the first 10 title regexes are evaluated', manyDry.valid === true && manyDry.warnings.some(w => w.includes('only the first 10')));
+  t('E31 safeRegexTest: match, no-match, and deadline results',
+    safeRegexTest(/^tag/i, 'Tag title') === true
+    && safeRegexTest(/^\[Tag\]/i, 'nope') === false
+    && safeRegexTest(/^(a+)+$/i, 'a'.repeat(40) + 'b') === null);
 
   // validate_only mechanics
   t('E25 validate_only made ZERO write-path calls', submitCalls === 0 && commentCalls === 0);
@@ -757,6 +783,66 @@ const confirm = { elicit: async () => 'confirmed' };
   const second = await tools.addComment({ post_id: 'p1', text: 'fallback comment' });
   t('G13 comment fallback: preview first, nothing sent', first.status === 'confirmation_required' && first.would_comment.target === 't3_p1' && afterFirst === cBefore);
   t('G14 identical second comment call proceeds once', second.comment_id === 'c9' && commentCalls === cBefore + 1);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SECTION H: cross-sub duplicate warning + gate atomicity under concurrency
+// ═════════════════════════════════════════════════════════════════════════════
+
+{
+  // Cross-sub content guard, directly on the gate
+  let ts = 1_000_000;
+  const g9 = new WriteGate({ now: () => ts });
+  t('H1 cross-sub miss before record', g9.findCrossSubDuplicate('other', 'T', 'B') === null);
+  g9.recordContent('SubA', 'My Title', 'My body', { post_id: 'xyz', url: 'https://r/suba/x' });
+  const hit = g9.findCrossSubDuplicate('other', 'My  Title', 'My body');
+  t('H2 same content in another sub is found with its origin', hit !== null && hit.subreddit === 'suba' && hit.result.post_id === 'xyz');
+  t('H3 same sub is NOT a cross-sub hit (the blocking guard owns it)', g9.findCrossSubDuplicate('SUBA', 'My Title', 'My body') === null);
+  ts += 15 * 60 * 1000 + 1;
+  t('H4 cross-sub record expires with the window', g9.findCrossSubDuplicate('other', 'My Title', 'My body') === null);
+
+  // Through the tool: cross-posted content proceeds with the RBP warning
+  tick(3600_000);
+  const xGate = new WriteGate({ now: () => now });
+  const xTools = new RedditWriteTools({ api, gate: xGate, cache, actingUser: 'testuser', verifyDelayMs: 0, sleep: async () => {} });
+  await xTools.createPost({ subreddit: 'anysub', title: 'Cross Sub Content', body_markdown: 'xbody' }, confirm);
+  tick();
+  const sBefore = submitCalls;
+  const crossed = await xTools.createPost({ subreddit: 'whitelist', title: 'Cross Sub Content', body_markdown: 'xbody' }, confirm);
+  t('H5 cross-sub duplicate still posts (deliberate cross-posting is legitimate)', crossed.post_id === 'p1' && submitCalls === sBefore + 1);
+  t('H6 and carries the RBP warning naming the earlier post', crossed.warnings.some(w => w.includes('r/anysub') && w.includes('Responsible Builder Policy') && w.includes('/comments/p1/')));
+
+  // Concurrency: the gate checks and their records must be atomic under
+  // parallel tool calls, or the floor and the dedupe guards are bypassable
+  tick();
+  const cGate = new WriteGate({ now: () => now });
+  const cTools = new RedditWriteTools({ api, gate: cGate, cache, actingUser: 'testuser', verifyDelayMs: 0, sleep: async () => {} });
+  const pBefore = submitCalls;
+  const burst = await Promise.allSettled(Array.from({ length: 8 }, (_, i) =>
+    cTools.createPost({ subreddit: 'anysub', title: `Concurrent ${i}`, body_markdown: 'b' }, confirm)));
+  t('H7 8 concurrent distinct posts submit exactly once', submitCalls === pBefore + 1 && burst.filter(r => r.status === 'fulfilled').length === 1);
+  t('H8 the other 7 are blocked by the write floor', burst.filter(r => r.status === 'rejected').length === 7
+    && burst.filter(r => r.status === 'rejected').every(r => r.reason.message.includes('interval')));
+
+  tick();
+  let raceElicits = 0;
+  const raceConfirm = { elicit: async () => { raceElicits++; return 'confirmed'; } };
+  const rBefore = submitCalls;
+  const [ra, rb] = await Promise.all([
+    cTools.createPost({ subreddit: 'anysub', title: 'Race post', body_markdown: 'rb' }, raceConfirm),
+    cTools.createPost({ subreddit: 'anysub', title: 'Race post', body_markdown: 'rb' }, raceConfirm),
+  ]);
+  t('H9 concurrent identical posts submit once, confirm once, share the result',
+    submitCalls === rBefore + 1 && ra.post_id === 'p1' && rb.post_id === 'p1' && raceElicits === 1);
+
+  tick();
+  const ccBefore = commentCalls;
+  const pair = await Promise.allSettled([
+    cTools.addComment({ post_id: 'p1', text: 'concurrent comment one' }, confirm),
+    cTools.addComment({ post_id: 'p1', text: 'concurrent comment two' }, confirm),
+  ]);
+  t('H10 concurrent distinct comments: one lands, one is floored', commentCalls === ccBefore + 1
+    && pair[0].status === 'fulfilled' && pair[1].status === 'rejected' && pair[1].reason.message.includes('interval'));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -706,15 +706,17 @@ export class RedditAPI {
     } catch (error: any) {
       clearTimeout(timeoutId);
       // Post-send failure: whether Reddit accepted the write is unknowable
-      // here. Surface that honestly instead of retrying; the WriteGate's
-      // idempotency record makes an identical re-issue safe for the caller.
+      // here. Surface that honestly instead of retrying. The WriteGate only
+      // records SUCCESSFUL submits for idempotent replay, so nothing exists
+      // to replay on this path and a blind re-issue can double-post; the
+      // message tells the caller to check for the write first.
       if (error.name === 'AbortError') {
         throw new Error(
-          `Write request timed out after ${this.timeout}ms. The submit may or may not have reached Reddit and was NOT retried automatically. Re-issuing the identical call is safe: a recent duplicate returns the original result.`
+          `Write request timed out after ${this.timeout}ms. The submit may or may not have reached Reddit and was NOT retried automatically. A retry is not guaranteed to be a no-op (nothing was recorded for replay because the outcome is unknown): check the acting user's newest submissions for the write, and re-issue only if it is missing.`
         );
       }
       throw new Error(redactWriteError(
-        `Write request failed before a response arrived: ${error?.message || String(error)}. It was NOT retried automatically; re-issue the identical call to check (a recent duplicate returns the original result).`
+        `Write request failed before a response arrived: ${error?.message || String(error)}. It was NOT retried automatically, and a retry is not guaranteed to be a no-op: check the acting user's newest submissions for the write before re-issuing.`
       ));
     }
     clearTimeout(timeoutId);

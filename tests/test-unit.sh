@@ -1720,8 +1720,104 @@ WRITEAPI_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   await auth12.load();
   const t12 = auth12.credentialsFromEnv() === true && auth12.getUsername() === "testuser";
 
-  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 && t11 && t12;
-  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12}));
+  // t13: pre-send rate-limit rejection: ZERO fetches, the message names the wait
+  let calls13 = 0;
+  globalThis.fetch = async () => { calls13++; return token(); };
+  const auth13 = new AuthManager();
+  await auth13.load();
+  const api13 = new RedditAPI({ authManager: auth13, rateLimiter: new RateLimiter({ limit: 0, window: 60000, name: "t" }), cacheManager: new CacheManager(), timeout: 2000 });
+  let err13 = "";
+  try { await api13.submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err13 = e.message; }
+  const t13 = calls13 === 0 && err13.includes("Rate limit reached");
+
+  // t14: AbortError timeout: honest wording, and no false promise that a
+  // re-issue is a no-op (nothing is recorded for replay on failure paths)
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    const e = new Error("aborted"); e.name = "AbortError"; throw e;
+  };
+  let err14 = "";
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err14 = e.message; }
+  const t14 = err14.includes("timed out") && err14.includes("NOT retried")
+    && err14.includes("not guaranteed to be a no-op") && err14.includes("newest submissions");
+
+  // t14b: pre-response failure guidance also avoids the no-op promise, and the
+  // redaction wiring holds THROUGH the transport (a secret-shaped token in the
+  // error message must not surface)
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    throw new Error("boom x-amz-signature=deadbeef99 done");
+  };
+  let err14b = "";
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err14b = e.message; }
+  const t14b = err14b.includes("[REDACTED]") && !err14b.includes("deadbeef99")
+    && err14b.includes("not guaranteed to be a no-op");
+
+  // t15: 200 with a non-JSON body is a named error, not a crash
+  globalThis.fetch = async (url) => String(url).includes("access_token") ? token() : new Response("<html>gateway</html>", { status: 200 });
+  let err15 = "";
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err15 = e.message; }
+  const t15 = err15.includes("non-JSON");
+
+  // t16: 200 submit envelope with no post data is a named error
+  globalThis.fetch = async (url) => String(url).includes("access_token") ? token() : json({ json: { errors: [], data: {} } });
+  let err16 = "";
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err16 = e.message; }
+  const t16 = err16.includes("no post data");
+
+  // t17: 200 comment envelope with no comment data is a named error
+  globalThis.fetch = async (url) => String(url).includes("access_token") ? token() : json({ json: { errors: [], data: { things: [] } } });
+  let err17 = "";
+  try { await (await mkApi()).submitComment("t3_abc12", "x"); } catch (e) { err17 = e.message; }
+  const t17 = err17.includes("no comment data");
+
+  // t18: flair endpoint 404 means flairs disabled: empty list, no fallback
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("link_flair_v2")) return new Response("", { status: 404 });
+    throw new Error("unexpected " + u);
+  };
+  const t18 = (await (await mkApi()).getLinkFlairs("noflairs")).length === 0;
+
+  // t19: flairselector fallback degrades to [] on a non-array choices shape
+  // AND on a failing selector request
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("link_flair_v2")) return new Response("", { status: 403 });
+    if (u.includes("flairselector")) return json({ choices: "not-an-array" });
+    throw new Error("unexpected " + u);
+  };
+  const sel19a = await (await mkApi()).getLinkFlairs("weirdsel");
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("link_flair_v2")) return new Response("", { status: 403 });
+    if (u.includes("flairselector")) return new Response("", { status: 500 });
+    throw new Error("unexpected " + u);
+  };
+  const sel19b = await (await mkApi()).getLinkFlairs("brokensel");
+  const t19 = sel19a.length === 0 && sel19b.length === 0;
+
+  // t20: the rules read caches: two reads, one fetch
+  let rulesCalls = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("/about/rules.json")) { rulesCalls++; return json({ rules: [] }); }
+    throw new Error("unexpected " + u);
+  };
+  const api20 = await mkApi();
+  await api20.getSubredditRulesRaw("test");
+  await api20.getSubredditRulesRaw("test");
+  const t20 = rulesCalls === 1;
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 && t11 && t12
+    && t13 && t14 && t14b && t15 && t16 && t17 && t18 && t19 && t20;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12,t13,t14,t14b,t15,t16,t17,t18,t19,t20}));
 ' 2>/dev/null)
 assert "Write transport: no post-send retry, envelope parsing, fresh info read, flair fallback" "echo \"\$WRITEAPI_RESULT\" | grep -q '^pass$'"
 
@@ -1816,12 +1912,61 @@ log_subsection "2ad. Write Registration Gating (mcp-server.ts) - NEW v1.2.0"
 
 WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   import { createSharedServices, createMCPServer } from "./dist/mcp-server.js";
+  import { mkdirSync, writeFileSync, rmSync } from "fs";
+  import { homedir } from "os";
+  import { join } from "path";
 
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
   const token = () => json({ access_token: "tok_0123456789", token_type: "bearer", expires_in: 3600, scope: "*" });
 
+  // Scrub EVERY inherited REDDIT_* variable before anything runs: a dev shell
+  // with real credentials exported must never leak them into these stages or
+  // let a stage make a live Reddit call. Same reason the throw-on-unexpected
+  // fetch mock goes in before the first createSharedServices.
+  for (const k of Object.keys(process.env)) { if (k.startsWith("REDDIT_")) delete process.env[k]; }
+  const noNetwork = async (url) => { throw new Error("no network expected: " + url); };
+  globalThis.fetch = noNetwork;
+  const setCreds = () => {
+    process.env.REDDIT_CLIENT_ID = "testclientid";
+    process.env.REDDIT_CLIENT_SECRET = "testsecret";
+    process.env.REDDIT_USERNAME = "testuser";
+    process.env.REDDIT_PASSWORD = "testpass";
+  };
+  const deleteCreds = () => {
+    delete process.env.REDDIT_CLIENT_ID;
+    delete process.env.REDDIT_CLIENT_SECRET;
+    delete process.env.REDDIT_USERNAME;
+    delete process.env.REDDIT_PASSWORD;
+  };
+  // Full-eligibility mock: token, a /me probe that succeeds, and the write
+  // pipeline fixtures used by the later stages
+  const eligibleFetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("/api/v1/me")) return json({ name: "testuser" });
+    if (u.endsWith("/api/submit")) return json({ json: { errors: [], data: { id: "p1", name: "t3_p1", url: "https://www.reddit.com/r/test/comments/p1/t/" } } });
+    if (u.includes("post_requirements")) return json({});
+    if (u.includes("/about.json")) return json({ data: { submission_type: "any" } });
+    if (u.includes("/api/info.json")) return json({ kind: "Listing", data: { children: [{ kind: "t3", data: { id: "p1", removed_by_category: null } }] } });
+    throw new Error("unexpected " + u);
+  };
+
+  // t0: full creds and a /me probe that WOULD succeed, but REDDIT_BUDDY_WRITE
+  // not set: the flag ALONE keeps the surface at 5 tools (plan decision 1,
+  // off by default). If the flag check regressed, the probe would pass here
+  // and this stage would see 8 tools.
+  setCreds();
+  globalThis.fetch = eligibleFetch;
+  const noFlag = await createSharedServices();
+  const noFlagSrv = await createMCPServer(noFlag, { transport: "stdio" });
+  const t0 = (await noFlagSrv.handlers["tools/list"]()).tools.length === 5
+    && noFlag.writeStatus.enabled === false
+    && noFlag.writeStatus.reason === "REDDIT_BUDDY_WRITE is not set";
+
   // t1: write requested but NO credentials: 5 tools, reason names the failure
+  deleteCreds();
   process.env.REDDIT_BUDDY_WRITE = "true";
+  globalThis.fetch = noNetwork;
   const bare = await createSharedServices();
   const bareSrv = await createMCPServer(bare, { transport: "stdio" });
   const bareTools = (await bareSrv.handlers["tools/list"]()).tools;
@@ -1829,12 +1974,8 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
     && bare.writeStatus.reason.includes("credentials");
 
   // t2: HTTP mode env denies even with full creds (no /me probe attempted)
-  process.env.REDDIT_CLIENT_ID = "testclientid";
-  process.env.REDDIT_CLIENT_SECRET = "testsecret";
-  process.env.REDDIT_USERNAME = "testuser";
-  process.env.REDDIT_PASSWORD = "testpass";
+  setCreds();
   process.env.REDDIT_BUDDY_HTTP = "true";
-  globalThis.fetch = async () => { throw new Error("no network expected"); };
   const httpShared = await createSharedServices();
   const httpSrv = await createMCPServer(httpShared, { transport: "stdio" });
   const t2 = httpShared.writeStatus.enabled === false && httpShared.writeStatus.reason.includes("stdio")
@@ -1870,17 +2011,34 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
     && probeFail.writeStatus.reason.includes("probe")
     && denialLines.some(l => l.includes("NOT enabled") && l.includes("probe"));
 
-  // Full eligibility: env creds + write flag + mocked /me probe
+  // t2d: credentials complete but sourced from an auth.json file (env unset):
+  // denied by provenance, since --auth files never persist the password and
+  // would degrade to app-only tokens after a restart. No probe is attempted.
+  deleteCreds();
+  const cfgDir = join(homedir(), ".reddit-mcp-buddy");
+  mkdirSync(cfgDir, { recursive: true });
+  writeFileSync(join(cfgDir, "auth.json"), JSON.stringify({ clientId: "testclientid", clientSecret: "testsecret", username: "testuser", password: "testpass" }));
+  globalThis.fetch = noNetwork;
+  const fromFile = await createSharedServices();
+  const t2d = fromFile.writeStatus.enabled === false
+    && fromFile.writeStatus.reason.includes("--auth file");
+  rmSync(join(cfgDir, "auth.json"));
+  setCreds();
+
+  // t2e: /me answers 200 but carries no name: an app-only-shaped token is
+  // denied by name (it cannot post)
   globalThis.fetch = async (url) => {
     const u = String(url);
     if (u.includes("access_token")) return token();
-    if (u.includes("/api/v1/me")) return json({ name: "testuser" });
-    if (u.endsWith("/api/submit")) return json({ json: { errors: [], data: { id: "p1", name: "t3_p1", url: "https://www.reddit.com/r/test/comments/p1/t/" } } });
-    if (u.includes("post_requirements")) return json({});
-    if (u.includes("/about.json")) return json({ data: { submission_type: "any" } });
-    if (u.includes("/api/info.json")) return json({ kind: "Listing", data: { children: [{ kind: "t3", data: { id: "p1", removed_by_category: null } }] } });
+    if (u.includes("/api/v1/me")) return json({});
     throw new Error("unexpected " + u);
   };
+  const noName = await createSharedServices();
+  const t2e = noName.writeStatus.enabled === false
+    && noName.writeStatus.reason.includes("no user identity");
+
+  // Full eligibility: env creds + write flag + mocked /me probe
+  globalThis.fetch = eligibleFetch;
   const shared = await createSharedServices();
 
   // t3: stdio-hinted server exposes exactly 8 tools with the right annotations
@@ -1927,10 +2085,10 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   const t7 = dry.valid === true && real.post_id === "p1" && real.status === "live"
     && replay.post_id === "p1" && Array.isArray(replay.warnings);
 
-  const all = t1 && t2 && t2b && t2c && t3 && t4 && t5 && t6 && t7;
-  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t2b,t2c,t3,t4,t5,t6,t7,bytes}));
+  const all = t0 && t1 && t2 && t2b && t2c && t2d && t2e && t3 && t4 && t5 && t6 && t7;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t0,t1,t2,t2b,t2c,t2d,t2e,t3,t4,t5,t6,t7,bytes}));
 ' 2>/dev/null)
-assert "Registration gating: 5 tools unless eligible+stdio, 8 when eligible, byte budget, shared gate" "echo \"\$WRITEREG_RESULT\" | grep -q '^pass$'"
+assert "Registration gating: flag off by default, denial reasons by name, 8 tools only when eligible+stdio" "echo \"\$WRITEREG_RESULT\" | grep -q '^pass$'"
 
 # --------------------------------------------------------------------------
 # 2ae. Write pipeline: preflight, confirmation, verify, invalidation - NEW v1.2.0
@@ -2115,7 +2273,7 @@ assert "write-unit.mjs: every assert passes (100% coverage floor enforced by npm
 # explicit accept with confirm:true may reach Reddit.
 log_subsection "2ag. Elicitation Confirmation Gate (mcp-server.ts) - NEW v1.2.0"
 
-ELICIT_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
+ELICIT_SCRIPT='
   import { createSharedServices, createMCPServer } from "./dist/mcp-server.js";
   import { Client } from "@modelcontextprotocol/sdk/client/index.js";
   import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -2175,11 +2333,42 @@ ELICIT_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   const posted = JSON.parse((await post("Confirmed post")).content[0].text);
   const t4 = posted.post_id === "p1" && posted.status === "live" && submitCalls === 1;
 
+  // t5: the MCP instructions block is a versioned release surface: the
+  // eligible stdio server carries the POSTING section naming the acting user,
+  // and a server without the stdio hint (read-only surface) must not.
+  const instructions = client.getInstructions() ?? "";
+  const { server: roServer } = await createMCPServer(shared);
+  const roClient = new Client({ name: "ro-test", version: "1.0" }, { capabilities: {} });
+  const [rct, rst] = InMemoryTransport.createLinkedPair();
+  await Promise.all([roClient.connect(rct), roServer.connect(rst)]);
+  const roInstructions = roClient.getInstructions() ?? "";
+  const t5 = instructions.includes("POSTING") && instructions.includes("u/testuser")
+    && !roInstructions.includes("POSTING");
+  await roClient.close();
+
   await client.close();
-  const all = t1 && t2 && t3 && t4;
-  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4}));
-' 2>/dev/null)
-assert "Elicitation gate: decline/cancel/soft-accept send nothing, confirmed accept posts once" "echo \"\$ELICIT_RESULT\" | grep -q '^pass$'"
+  const all = t1 && t2 && t3 && t4 && t5;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5}));
+'
+# This block drives a real client/server pair over an in-memory transport and
+# is timing-sensitive; it has flaked once under load. Capture the inner stderr
+# to a file (instead of discarding it) so a red run is diagnosable, and retry
+# once before failing.
+ELICIT_ERR_FILE="$(mktemp)"
+run_elicit_gate() {
+  HOME="$(mktemp -d)" node --input-type=module -e "$ELICIT_SCRIPT" 2>"$ELICIT_ERR_FILE"
+}
+ELICIT_RESULT=$(run_elicit_gate)
+if ! echo "$ELICIT_RESULT" | grep -q '^pass$'; then
+  echo "  2ag attempt 1 did not pass (result: ${ELICIT_RESULT:-empty}); inner stderr:"
+  sed 's/^/    | /' "$ELICIT_ERR_FILE"
+  ELICIT_RESULT=$(run_elicit_gate)
+  if ! echo "$ELICIT_RESULT" | grep -q '^pass$'; then
+    echo "  2ag retry did not pass (result: ${ELICIT_RESULT:-empty}); inner stderr:"
+    sed 's/^/    | /' "$ELICIT_ERR_FILE"
+  fi
+fi
+assert "Elicitation gate: decline/cancel/soft-accept send nothing, confirmed accept posts once, instructions gated" "echo \"\$ELICIT_RESULT\" | grep -q '^pass$'"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

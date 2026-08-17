@@ -68,8 +68,13 @@ export class WriteGate {
 
   // key -> completed write, for idempotent replay of retried submits
   private submits = new Map<string, { at: number; result: StoredWriteResult }>();
+  // subreddit-independent content hash -> where that content already went,
+  // for the cross-subreddit duplicate warning (RBP anti-spam, plan section 10)
+  private crossSubContent = new Map<string, { at: number; subreddit: string; result: StoredWriteResult }>();
   // key -> timestamp of a passed validate_only run (no-elicitation fallback)
   private validatePasses = new Map<string, number>();
+  // Single-flight write chain; see runExclusive()
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(options: WriteGateOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -90,6 +95,21 @@ export class WriteGate {
     this.minWriteIntervalMs = envIntervalS !== undefined
       ? Math.max(MIN_WRITE_INTERVAL_MS, envIntervalS * 1000)
       : MIN_WRITE_INTERVAL_MS;
+  }
+
+  /**
+   * Run a write flow with no other write flow in flight. The gate's checks
+   * and the records that commit them straddle awaits (elicitation, the
+   * submit itself), so two concurrent tool calls could otherwise BOTH pass
+   * checkWrite before either recordWrite lands, bypassing the rate floor and
+   * the idempotency guard. One gate exists per process, which makes this
+   * chain a process-wide write mutex; a concurrent identical call simply
+   * runs second and replays the first call's recorded result.
+   */
+  runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.writeChain.then(fn);
+    this.writeChain = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   /**
@@ -147,9 +167,11 @@ export class WriteGate {
   }
 
   /**
-   * Idempotency key for a post submit. A transport-level failure after send
-   * (timeout, 5xx) leaves "did Reddit accept it?" unknowable; retrying the
-   * identical submit must replay the stored result instead of double-posting.
+   * Idempotency key for a post submit. A COMPLETED submit is recorded under
+   * this key, so an identical retry within the window replays the stored
+   * result instead of double-posting. A failed-after-send submit records
+   * nothing here (the outcome is unknowable), which is why the transport
+   * errors tell the model to check for the write before re-issuing.
    */
   makePostKey(subreddit: string, kind: string, title: string, bodyOrUrl: string): string {
     return this.hashKey('post', this.normSubreddit(subreddit), kind.trim().toLowerCase(),
@@ -184,10 +206,32 @@ export class WriteGate {
     return this.submits.get(this.makeContentKey(subreddit, title, body))?.result ?? null;
   }
 
-  /** Record a successful post under its content hash for the duplicate guard. */
+  /** Record a successful post under its content hashes for both guards. */
   recordContent(subreddit: string, title: string, body: string, result: StoredWriteResult): void {
     this.pruneSubmits();
     this.submits.set(this.makeContentKey(subreddit, title, body), { at: this.now(), result });
+    this.crossSubContent.set(this.makeAnySubContentKey(title, body), {
+      at: this.now(),
+      subreddit: this.normSubreddit(subreddit),
+      result,
+    });
+  }
+
+  /**
+   * Cross-subreddit duplicate content check (plan section 10): the same
+   * (title, body) posted to a DIFFERENT subreddit within the window is the
+   * repost-across-subreddits pattern Reddit's Responsible Builder Policy
+   * names as spam. Deliberate cross-posting is legitimate, so a hit warns
+   * rather than blocks; same-sub duplicates are handled (and blocked) by
+   * findDuplicateContent instead.
+   */
+  findCrossSubDuplicate(subreddit: string, title: string, body: string): { subreddit: string; result: StoredWriteResult } | null {
+    this.pruneSubmits();
+    const entry = this.crossSubContent.get(this.makeAnySubContentKey(title, body));
+    if (entry && entry.subreddit !== this.normSubreddit(subreddit)) {
+      return { subreddit: entry.subreddit, result: entry.result };
+    }
+    return null;
   }
 
   /**
@@ -218,6 +262,9 @@ export class WriteGate {
     for (const [key, entry] of this.submits.entries()) {
       if (entry.at <= cutoff) this.submits.delete(key);
     }
+    for (const [key, entry] of this.crossSubContent.entries()) {
+      if (entry.at <= cutoff) this.crossSubContent.delete(key);
+    }
   }
 
   private pruneValidatePasses(): void {
@@ -230,6 +277,11 @@ export class WriteGate {
   private makeContentKey(subreddit: string, title: string, body: string): string {
     return this.hashKey('content', this.normSubreddit(subreddit),
       this.normText(title), this.normText(body));
+  }
+
+  /** Content hash WITHOUT the subreddit, for the cross-sub duplicate check. */
+  private makeAnySubContentKey(title: string, body: string): string {
+    return this.hashKey('content-any', this.normText(title), this.normText(body));
   }
 
   /**

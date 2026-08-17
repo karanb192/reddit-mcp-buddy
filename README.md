@@ -2,7 +2,7 @@
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - browse subreddits with no API keys; add Reddit credentials for search, comments, user analysis, and full metrics. Since v1.2.0 it can also post and comment for you: off by default, confirmed before every submit, and capped hard. See [Posting](#posting-v120).
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - browse subreddits with no API keys; add Reddit credentials for search, comments, user analysis, and full metrics. Since v1.2.0 it can also post and comment for you: off by default, every submit gated behind a confirmation step, and rate-capped in the server. See [Posting](#posting-v120).
 
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![npm downloads](https://img.shields.io/npm/dm/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
@@ -263,11 +263,11 @@ Posting as you is the highest-trust thing an MCP server can do, so the guardrail
 
 - **Off by default.** Without `REDDIT_BUDDY_WRITE`, the write tools do not exist: read-only installs see exactly the same 5 tools as before, and pay zero extra context.
 - **stdio only.** The HTTP transport has no authentication, so write tools refuse to register there. No process on your machine or network can turn the HTTP endpoint into a posting proxy.
-- **You confirm every submit.** Clients that support [MCP elicitation](https://modelcontextprotocol.io/specification/latest) get a server-side confirmation prompt showing the subreddit, a content preview, and the acting account. Clients that cannot prompt get a preview response instead, and the identical call must be repeated within 15 minutes to actually submit (a `validate_only` run of the same content also arms it).
-- **Hourly caps you cannot raise.** At most 5 posts/hour, 30 comments/hour, and 15 seconds between writes, enforced in the server. Environment variables can tighten these, never loosen them.
-- **Duplicate suppression.** Retrying an identical submit within 15 minutes returns the original post instead of posting twice, including the same content re-drafted for the same sub.
+- **You confirm every submit.** Clients that support [MCP elicitation](https://modelcontextprotocol.io/specification/latest) get a server-side confirmation prompt showing what will be posted, where (subreddit or target post/comment), and as which account. Clients that cannot prompt get a preview response instead, and the identical call must be repeated within 15 minutes to submit (a `validate_only` run of the same content also arms it).
+- **Hourly caps you cannot raise.** At most 5 posts/hour, 30 comments/hour, and 15 seconds between writes, enforced in the server. Environment variables can tighten these, never loosen them. Honest limit: the caps live in the server process (a restart resets the hour, and a fork of this open-source code can remove them). They exist to make casual abuse pointless, not to stop a determined operator.
+- **Duplicate suppression.** Retrying an identical submit within 15 minutes returns the original post instead of posting twice, including the same content re-drafted for the same sub. Posting the same content to a different subreddit is allowed, with a warning naming the earlier post.
 - **Verified after submit.** Reddit happily returns "success" for posts AutoModerator removes seconds later. The server re-checks after submitting and reports `status: "filtered"` with a warning when that happens, instead of telling you it went live.
-- **Conspicuous logging.** Every allowed write is logged to stderr with the kind, subreddit, and acting user.
+- **Conspicuous logging.** Every allowed write is logged to stderr with the kind, the target (subreddit when known), and the acting user.
 
 ### Know the trade-off before enabling
 
@@ -301,7 +301,7 @@ Reddit MCP Buddy is designed with privacy and transparency in mind. Here's how y
 - **Local Processing**: All data processing happens locally on your machine
 
 ### Security Notes
-- **Read-Only by Default**: The server never posts, comments, or modifies Reddit content unless you explicitly enable the [posting tools](#posting-v120), and even then every submit needs your confirmation
+- **Read-Only by Default**: The server never posts, comments, or modifies Reddit content unless you explicitly enable the [posting tools](#posting-v120), and even then every submit goes through a confirmation gate
 - **Credential Safety**:
   - OAuth tokens are refreshed automatically and kept in memory; only `--auth` CLI setups also cache the token in `~/.reddit-mcp-buddy/auth.json` (file mode 600)
   - Client secrets are treated as sensitive and never logged
@@ -554,11 +554,11 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `REDDIT_BUDDY_WRITE` | Register the [posting tools](#posting-v120) (needs all 4 credentials via env, stdio transport) | `false` |
-| `REDDIT_BUDDY_MAX_POSTS_PER_HOUR` | Posts per hour; only values BELOW 5 are honored | `5` |
-| `REDDIT_BUDDY_MAX_COMMENTS_PER_HOUR` | Comments per hour; only values BELOW 30 are honored | `30` |
+| `REDDIT_BUDDY_MAX_POSTS_PER_HOUR` | Posts per hour; only values from 1 to 4 are honored (0 and invalid values are ignored) | `5` |
+| `REDDIT_BUDDY_MAX_COMMENTS_PER_HOUR` | Comments per hour; only values from 1 to 29 are honored (0 and invalid values are ignored) | `30` |
 | `REDDIT_BUDDY_MIN_WRITE_INTERVAL_S` | Seconds between writes; only values ABOVE 15 are honored | `15` |
 
-The three rate-floor variables can only tighten the built-in caps. Setting them looser than the defaults does nothing, on purpose.
+The three rate-floor variables can only tighten the built-in caps. Setting them looser than the defaults does nothing, on purpose, and 0 does not mean "pause posting": it falls back to the default cap.
 
 > **HTTP mode has no authentication.** It binds to localhost so only your machine can reach it, and rejects Host headers outside the loopback set. Setting `REDDIT_BUDDY_HOST=0.0.0.0` exposes it to your whole network - only do that on a trusted network (e.g. inside Docker, which sets it deliberately). On a non-loopback bind the Host check is off by default, since clients legitimately arrive with a container IP or service name; set `REDDIT_BUDDY_ALLOWED_HOSTS` to restrict it. Browser requests are rejected unless their origin is listed in `REDDIT_BUDDY_ALLOWED_ORIGINS`; non-browser clients like Postman are unaffected.
 

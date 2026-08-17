@@ -119,6 +119,13 @@ function parseRatelimitWaitMinutes(message: string): number | undefined {
   return /second/i.test(match[2]) ? Math.max(1, Math.ceil(n / 60)) : n;
 }
 
+// Unknown triple types and fields are response-body text and thus unvetted
+// (plan 3.6: scrub to a whitelist rather than echoing raw text). Only a short
+// alphanumeric token shape may be echoed; anything else degrades to UNKNOWN
+// for the type and is omitted for the field. Reddit's real error enums
+// (RATELIMIT, NO_URL, ...) all fit this shape comfortably.
+const SAFE_TOKEN_RE = /^[A-Za-z0-9_]{1,40}$/;
+
 /**
  * Map Reddit's error triples to actionable guidance. Prefers the first triple
  * whose type is in the known table; a fully unknown set gets a generic
@@ -143,8 +150,10 @@ export function mapWriteError(triples: WriteErrorTriple[]): MappedWriteError {
   }
 
   const first = triples[0];
-  const type = typeof first?.[0] === 'string' && first[0] ? first[0] : 'UNKNOWN';
-  const field = typeof first?.[2] === 'string' && first[2] ? first[2] : undefined;
+  const rawType = typeof first?.[0] === 'string' && first[0] ? first[0] : 'UNKNOWN';
+  const type = SAFE_TOKEN_RE.test(rawType) ? rawType : 'UNKNOWN';
+  const rawField = typeof first?.[2] === 'string' && first[2] ? first[2] : undefined;
+  const field = rawField !== undefined && SAFE_TOKEN_RE.test(rawField) ? rawField : undefined;
   return {
     code: type,
     message: `Reddit rejected the write (${type}${field ? ` on field ${field}` : ''}).`,
@@ -181,10 +190,11 @@ export function mapWriteHttpError(status: number, subreddit?: string): WriteErro
     return new WriteError({
       code: `HTTP_${status}`,
       // 5xx after a write was sent is ambiguous: Reddit may have accepted it
-      // before failing. The transport never auto-retries; the idempotency
-      // record makes an identical manual retry safe.
+      // before failing. The transport never auto-retries, and NOTHING was
+      // recorded for idempotent replay (only successful submits are stored),
+      // so a blind retry can double-post. Say so.
       message: `Reddit server error (HTTP ${status}); the write may or may not have gone through.`,
-      guidance: 'It was not retried automatically. Re-issue the identical call: a recent duplicate returns the original result instead of double-posting.',
+      guidance: 'It was not retried automatically, and a retry is not guaranteed to be a no-op. Check the acting user\'s newest submissions first; re-issue only if the write is not there.',
       retryable: false,
     });
   }

@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { runInNewContext } from 'vm';
 import { RedditAPI, LinkFlair } from '../services/reddit-api.js';
 import { WriteGate, StoredWriteResult } from '../core/write-gate.js';
 import { CacheManager } from '../core/cache.js';
@@ -69,7 +70,11 @@ export const addCommentSchema = z.object({
   post_id: z.string().optional().describe('Post to comment on (top level), e.g. "1abc2d3" or t3_1abc2d3'),
   comment_id: z.string().optional().describe('Comment to reply to, e.g. "def456" or t1_def456'),
   url: z.string().optional().describe('Reddit URL of the post or of the specific comment to reply to'),
-  text: z.string().trim().min(1).describe('Comment body (markdown)'),
+  // No .trim(): trimming would pull a leading 4-space-indented code block's
+  // first line out of the block. Emptiness is rejected without altering text.
+  text: z.string()
+    .refine(s => s.trim().length > 0, 'Comment text cannot be empty')
+    .describe('Comment body (markdown)'),
 });
 
 export const subredditRulesSchema = z.object({
@@ -219,6 +224,28 @@ const RULE_DESCRIPTION_CAP = 400;
 const SUBMIT_TEXT_CAP = 500;
 const FLAIR_LIST_CAP = 20;
 const PREVIEW_CAP = 200;
+
+// ── Bounded title-regex evaluation ───────────────────────────────────────────
+// title_regexes come from post_requirements, which subreddit MODS author
+// (plan 3.7: attacker-influenceable data). A crafted pattern like ^(a+)+$
+// backtracks catastrophically on a 33-char title and would freeze this
+// single-threaded server, reads included. Execution is bounded three ways: at
+// most TITLE_REGEX_MAX_COUNT patterns run, none longer than
+// TITLE_REGEX_MAX_LENGTH, and each test runs inside a vm context with a hard
+// timeout that V8 interrupts mid-backtrack. A pattern that cannot be
+// evaluated safely degrades to a warning, never a block and never a hang.
+const TITLE_REGEX_MAX_COUNT = 10;
+const TITLE_REGEX_MAX_LENGTH = 1000;
+const TITLE_REGEX_TIMEOUT_MS = 100;
+
+/** true/false = the regex ran to completion; null = it hit the deadline. */
+export function safeRegexTest(re: RegExp, text: string): boolean | null {
+  try {
+    return runInNewContext('re.test(s)', { re, s: text }, { timeout: TITLE_REGEX_TIMEOUT_MS }) as boolean;
+  } catch {
+    return null;
+  }
+}
 
 export interface RedditWriteToolsOptions {
   api: RedditAPI;
@@ -375,6 +402,12 @@ export class RedditWriteTools {
       };
     }
 
+    // Steps 4-10 run under the gate's write mutex: the checks below and the
+    // records that commit them straddle awaits (elicitation, the submit), so
+    // without it two concurrent create_post calls could BOTH pass the rate
+    // floor and the duplicate guards before either recorded anything.
+    return this.gate.runExclusive(async () => {
+
     // 4. Idempotency + same-sub duplicate content guard: an identical retry
     // or a re-drafted duplicate returns the original result, never re-posts.
     // Checked BEFORE the rate floor: a replay is a no-op that performs no
@@ -391,6 +424,13 @@ export class RedditWriteTools {
         warnings: ['This exact content was already posted within the last 15 minutes; returning the original result instead of posting a duplicate.'],
       };
     }
+
+    // 4b. Cross-subreddit duplicate content (plan section 10): the same
+    // content recently posted to a DIFFERENT sub proceeds (deliberate
+    // cross-posting is legitimate) but carries a prominent warning, because
+    // auto-reposting similar content across subreddits is what Reddit's
+    // Responsible Builder Policy names as spam.
+    const crossDup = this.gate.findCrossSubDuplicate(params.subreddit, params.title, bodyOrUrl);
 
     // 5. Non-bypassable rate floor
     const check = this.gate.checkWrite('post');
@@ -455,6 +495,9 @@ export class RedditWriteTools {
     // AutoModerator removes the post seconds later. One fresh (cache-bypassing)
     // read catches that; best-effort, since removal can also land later.
     const warnings = [...preflight.warnings];
+    if (crossDup) {
+      warnings.push(`Substantially the same content was posted to r/${crossDup.subreddit} within the last 15 minutes (${crossDup.result.url}). Auto-posting similar content across subreddits is what Reddit's Responsible Builder Policy treats as spam; make sure this cross-post is deliberate.`);
+    }
     let status: 'live' | 'filtered' | 'unverified' = 'unverified';
     try {
       await this.sleep(this.verifyDelayMs);
@@ -481,6 +524,8 @@ export class RedditWriteTools {
       status,
       ...(warnings.length > 0 && { warnings }),
     };
+
+    });
   }
 
   // ── add_comment ────────────────────────────────────────────────────────────
@@ -489,6 +534,10 @@ export class RedditWriteTools {
     // 1. Resolve exactly one target (throws clear errors on ambiguity)
     const target = resolveCommentTarget(params);
     const key = this.gate.makeCommentKey(target.thingId, params.text);
+
+    // Steps 2-7 run under the gate's write mutex, for the same reason as
+    // createPost: concurrent calls must not race the checks past the records.
+    return this.gate.runExclusive(async () => {
 
     // 2. Idempotent replay of a recent identical comment. Before the rate
     // floor: a replay is a no-op and must not wait out the write interval.
@@ -563,6 +612,8 @@ export class RedditWriteTools {
       acting_user: this.actingUser,
       ...(warnings.length > 0 && { warnings }),
     };
+
+    });
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
@@ -625,7 +676,7 @@ export class RedditWriteTools {
     if (requirements === null) {
       notChecked.push('posting requirements (endpoint unavailable for this subreddit)');
     } else {
-      this.checkTitleRequirements(params.title, requirements, sub);
+      warnings.push(...this.checkTitleRequirements(params.title, requirements, sub));
       checked.push('title length, format, and required/banned strings');
 
       if (kind === 'self') {
@@ -662,8 +713,13 @@ export class RedditWriteTools {
     return { checked, not_checked: notChecked, warnings };
   }
 
-  /** Title checks from post_requirements: bounds, regexes, string lists. */
-  private checkTitleRequirements(title: string, req: Record<string, unknown>, sub: string): void {
+  /**
+   * Title checks from post_requirements: bounds, regexes, string lists.
+   * Throws on a definite violation; returns warnings for regexes that could
+   * not be evaluated within the safety bounds (those titles go unchecked
+   * rather than blocking or hanging the server on mod-authored patterns).
+   */
+  private checkTitleRequirements(title: string, req: Record<string, unknown>, sub: string): string[] {
     const min = typeof req.title_text_min_length === 'number' ? req.title_text_min_length : undefined;
     const max = typeof req.title_text_max_length === 'number' ? req.title_text_max_length : undefined;
     if (min !== undefined && title.length < min) {
@@ -690,19 +746,33 @@ export class RedditWriteTools {
       throw new Error(`r/${sub} requires the title to include one of: ${required.map(s => `"${s}"`).join(', ')}.`);
     }
 
+    const warnings: string[] = [];
     const regexes = (Array.isArray(req.title_regexes) ? req.title_regexes : [])
       .filter((s): s is string => typeof s === 'string' && s.length > 0);
-    for (const pattern of regexes) {
+    if (regexes.length > TITLE_REGEX_MAX_COUNT) {
+      warnings.push(`r/${sub} lists ${regexes.length} title regexes; only the first ${TITLE_REGEX_MAX_COUNT} were checked.`);
+    }
+    for (const pattern of regexes.slice(0, TITLE_REGEX_MAX_COUNT)) {
+      if (pattern.length > TITLE_REGEX_MAX_LENGTH) {
+        warnings.push(`r/${sub} has a title regex too long to evaluate safely (${pattern.length} chars); the title was not checked against it.`);
+        continue;
+      }
       let re: RegExp;
       try {
         re = new RegExp(pattern, 'i');
       } catch {
         continue; // a subreddit's regex that JS cannot compile is skipped, not fatal
       }
-      if (!re.test(title)) {
+      const matched = safeRegexTest(re, title);
+      if (matched === null) {
+        warnings.push(`r/${sub} has a title regex that timed out (catastrophic backtracking); the title was not checked against it.`);
+        continue;
+      }
+      if (!matched) {
         throw new Error(`r/${sub} requires titles to match: ${pattern}`);
       }
     }
+    return warnings;
   }
 
   /** Link-post domain checks from post_requirements. */
