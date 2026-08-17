@@ -61,5 +61,86 @@
       "name": "reddit_explain",
       "description": "Get explanations of Reddit terminology, slang, and culture (karma, cake day, AMA, ELI5, etc.) with definitions and usage examples."
     }
-  ]
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "asm": {
+        "asm_version": "0.3",
+        "service_id": "io.github.karanb192/reddit-mcp-buddy@1.1.14",
+        "taxonomy": "tool.data.search",
+        "display_name": "Reddit MCP Buddy",
+        "provenance": {
+          "source_url": "https://github.com/karanb192/reddit-mcp-buddy/blob/8d31a285db78d8e34546c1d1023e7550bbc2c135/README.md",
+          "retrieved_at": "2026-08-17T01:32:35Z",
+          "last_verified_at": "2026-08-17T01:32:35Z",
+          "verification_status": "self_reported",
+          "notes": "Publisher documentation states that the local server is free and read-only. Anonymous browsing and the offline explanation tool require no credentials; search, comments, user analysis, and full metrics require optional Reddit credentials. Rate limits vary by authentication mode; no latency, uptime, or quality claim is inferred."
+        },
+        "invocation": {
+          "interface": "mcp",
+          "reach": "local_device",
+          "agent_operable": true,
+          "auth_to_invoke": "none",
+          "agent_completable_setup": true,
+          "platforms": [
+            "any"
+          ],
+          "docs_url": "https://github.com/karanb192/reddit-mcp-buddy/blob/8d31a285db78d8e34546c1d1023e7550bbc2c135/README.md"
+        },
+        "pricing": {
+          "billing_dimensions": [
+            {
+              "dimension": "request",
+              "unit": "per_1",
+              "cost_per_unit": 0,
+              "currency": "USD"
+            }
+          ]
+        },
+        "sla": {
+          "rate_limit": "anonymous server cap 10 req/min; app-only 60 req/min; authenticated 100 req/min; upstream Reddit throttling may be stricter"
+        },
+        "payment": {
+          "methods": [
+            "free_tier"
+          ],
+          "auth_type": "optional_reddit_credentials"
+        },
+        "operational_constraints": {
+          "risk_class": "low",
+          "side_effects": [
+            "read_only",
+            "external_api_call",
+            "network_access"
+          ],
+          "approval": {
+            "required": "never",
+            "human_readable": "All exposed Reddit tools are read-only; consumers may still apply stricter local policy."
+          },
+          "rate_limits": [
+            {
+              "dimension": "request",
+              "limit": 10,
+              "period": "minute",
+              "scope": "anonymous server cap"
+            },
+            {
+              "dimension": "request",
+              "limit": 60,
+              "period": "minute",
+              "scope": "app-only credentials"
+            },
+            {
+              "dimension": "request",
+              "limit": 100,
+              "period": "minute",
+              "scope": "authenticated credentials"
+            }
+          ],
+          "receipt_required": false,
+          "policy_notes": "The MCP server does not enforce consumer approval policy or emit ASM receipts. Reddit applies separate upstream throttles."
+        }
+      }
+    }
+  }
 }
