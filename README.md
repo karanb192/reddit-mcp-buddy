@@ -2,7 +2,7 @@
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - browse subreddits with no API keys; add free Reddit credentials for search, comments, user analysis, and full metrics.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - browse subreddits with no API keys; add Reddit credentials for search, comments, user analysis, and full metrics. Since v1.2.0 it can also post and comment for you: off by default, confirmed before every submit, and capped hard. See [Posting](#posting-v120).
 
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![npm downloads](https://img.shields.io/npm/dm/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
@@ -26,6 +26,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 - [What can it do?](#what-can-it-do)
 - [Available Tools](#available-tools)
 - [Authentication](#authentication-optional)
+- [Posting (v1.2.0)](#posting-v120)
 - [Installation Options](#installation-options)
   - [Global Install](#global-install)
   - [From Source](#from-source)
@@ -39,7 +40,8 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## What makes Reddit MCP Buddy different?
 
-- **🚀 Zero setup** - Browse subreddits instantly, no Reddit API registration needed (search, comments, user analysis, and engagement metrics need free credentials)
+- **🚀 Zero setup** - Browse subreddits instantly, no Reddit API registration needed (search, comments, user analysis, and engagement metrics need credentials)
+- **✍️ Opt-in posting (v1.2.0)** - Create posts and comments with server-side confirmations, hard rate caps, and duplicate suppression
 - **⚡ Up to 10x more requests** - Three-tier authentication system (10/60/100 requests per minute)
 - **🎯 Clean data** - No fake "sentiment analysis" or made-up metrics
 - **🧠 LLM-optimized** - Built specifically for AI assistants like Claude
@@ -90,6 +92,7 @@ Ask your AI assistant to:
 - 💬 **"Get comments from this Reddit post"** - Fetch post with full comment threads
 - 👤 **"Analyze user spez"** - Get user history, karma, and activity
 - 📚 **"Explain Reddit karma"** - Understand Reddit terminology
+- ✍️ **"Post this to r/test"** - Draft, check the sub's rules, and submit after you confirm (opt-in, see [Posting](#posting-v120))
 
 ## Available Tools
 
@@ -145,13 +148,27 @@ Get explanations of Reddit terms.
 - Terms: karma, cake day, AMA, ELI5, etc.
 ```
 
+### Write tools (opt-in)
+
+`create_post`, `add_comment`, and `subreddit_rules` only appear when you enable posting; read-only installs see exactly the five tools above. Details in [Posting (v1.2.0)](#posting-v120).
+
 ## Authentication (Optional)
 
-Want more requests? Add Reddit credentials to your Claude Desktop config:
+Want more requests? Add Reddit credentials to your Claude Desktop config.
+
+### Reddit now requires approval for new API apps
+
+Since November 2025, Reddit's [Responsible Builder Policy](https://www.reddit.com/r/redditdev/comments/1oug31u/introducing_the_responsible_builder_policy_new/) requires new developers to request access before building on the API. What that means for you:
+
+- **Already have credentials?** Existing apps keep working. Nothing changes for you.
+- **Anonymous mode still works** with zero setup: `browse_subreddit` (via Reddit's public RSS feed) and `reddit_explain` need no credentials at all.
+- **Creating credentials for the first time?** You now need Reddit's approval before your app works. Request access through the process linked in the [policy announcement](https://www.reddit.com/r/redditdev/comments/1oug31u/introducing_the_responsible_builder_policy_new/), then create the app at https://www.reddit.com/prefs/apps once approved. How long approval takes is Reddit's call, not this project's; Reddit has not published a timeline.
+
+There is no supported workaround: this server talks to Reddit's official API only, so credentials it uses must be approved ones. If Reddit denies or delays your request, anonymous mode keeps working in the meantime.
 
 ### Setup Steps
 
-1. **Go to** https://www.reddit.com/prefs/apps
+1. **Go to** https://www.reddit.com/prefs/apps (new developers: get [approval](https://www.reddit.com/r/redditdev/comments/1oug31u/introducing_the_responsible_builder_policy_new/) first, see above)
 2. **Click** "Create App" or "Create Another App"
 3. **Fill out the form:**
    - **Name**: Any name (e.g., "reddit-mcp-buddy")
@@ -204,6 +221,60 @@ Reddit MCP Buddy supports three authentication levels, each with different rate 
 - Web apps only support app-only mode (60 rpm maximum)
 - For 100 requests/minute, you MUST use a script app with username + password
 
+## Posting (v1.2.0)
+
+Since v1.2.0 the server can post for you. Three tools, all opt-in:
+
+- **`create_post`** - Submit a text or link post to one subreddit. Runs the sub's mechanical rules first (title limits, flair required, link vs text allowed), supports `validate_only: true` as a dry run that posts nothing, and asks you before every real submit.
+- **`add_comment`** - Comment on a post or reply to a specific comment (by id or URL). Same confirmation before every submit.
+- **`subreddit_rules`** - Read-only. Fetches a sub's rules, posting requirements, capability flags, and flair choices in one cached call, so drafts fit the sub before anything is submitted.
+
+The intended workflow: `subreddit_rules` first, then `create_post` with `validate_only: true`, then the real `create_post`. One confirmation replaces the whole draft-then-copy-paste dance.
+
+### Enabling posting
+
+Add `REDDIT_BUDDY_WRITE` next to your existing credentials:
+
+```json
+{
+  "mcpServers": {
+    "reddit": {
+      "command": "npx",
+      "args": ["-y", "reddit-mcp-buddy"],
+      "env": {
+        "REDDIT_CLIENT_ID": "your_client_id",
+        "REDDIT_CLIENT_SECRET": "your_client_secret",
+        "REDDIT_USERNAME": "your_username",
+        "REDDIT_PASSWORD": "your_password",
+        "REDDIT_BUDDY_WRITE": "true"
+      }
+    }
+  }
+}
+```
+
+Claude Desktop extension users: flip the **Enable posting tools** toggle in the extension settings instead. It maps to the same `REDDIT_BUDDY_WRITE` variable.
+
+All four credentials must come from environment variables (or the extension's config fields, which become environment variables). The interactive `--auth` file setup cannot write after a restart: it never saves your password, so on the next start the server only holds app-only tokens, and those cannot post. If any requirement is missing, the server logs exactly which one at startup instead of failing mid-post.
+
+### The safety model, in plain words
+
+Posting as you is the highest-trust thing an MCP server can do, so the guardrails live in the server, not in the client's goodwill:
+
+- **Off by default.** Without `REDDIT_BUDDY_WRITE`, the write tools do not exist: read-only installs see exactly the same 5 tools as before, and pay zero extra context.
+- **stdio only.** The HTTP transport has no authentication, so write tools refuse to register there. No process on your machine or network can turn the HTTP endpoint into a posting proxy.
+- **You confirm every submit.** Clients that support [MCP elicitation](https://modelcontextprotocol.io/specification/latest) get a server-side confirmation prompt showing the subreddit, a content preview, and the acting account. Clients that cannot prompt get a preview response instead, and the identical call must be repeated within 15 minutes to actually submit (a `validate_only` run of the same content also arms it).
+- **Hourly caps you cannot raise.** At most 5 posts/hour, 30 comments/hour, and 15 seconds between writes, enforced in the server. Environment variables can tighten these, never loosen them.
+- **Duplicate suppression.** Retrying an identical submit within 15 minutes returns the original post instead of posting twice, including the same content re-drafted for the same sub.
+- **Verified after submit.** Reddit happily returns "success" for posts AutoModerator removes seconds later. The server re-checks after submitting and reports `status: "filtered"` with a warning when that happens, instead of telling you it went live.
+- **Conspicuous logging.** Every allowed write is logged to stderr with the kind, subreddit, and acting user.
+
+### Know the trade-off before enabling
+
+Reddit's password grant returns a token with **full account scope**. With posting off, the credentials in your config buy higher read limits; with posting on, they can do anything your account can do. The credentials themselves were always this powerful (that is how Reddit's script-app auth works), but enabling write means the server actually exercises that power, so treat the config file accordingly: keep it out of version control and off shared machines.
+
+Also worth knowing: Reddit applies its own account-level posting throttles on top of everything above, based on account age and karma. If Reddit says "try again in N minutes", the server surfaces the wait instead of hammering.
+
 ## Privacy & Data Handling
 
 Reddit MCP Buddy is designed with privacy and transparency in mind. Here's how your data is handled:
@@ -230,7 +301,7 @@ Reddit MCP Buddy is designed with privacy and transparency in mind. Here's how y
 - **Local Processing**: All data processing happens locally on your machine
 
 ### Security Notes
-- **Read-Only Operations**: All tools are read-only - the server never posts, comments, or modifies any Reddit content
+- **Read-Only by Default**: The server never posts, comments, or modifies Reddit content unless you explicitly enable the [posting tools](#posting-v120), and even then every submit needs your confirmation
 - **Credential Safety**:
   - OAuth tokens are refreshed automatically and kept in memory; only `--auth` CLI setups also cache the token in `~/.reddit-mcp-buddy/auth.json` (file mode 600)
   - Client secrets are treated as sensitive and never logged
@@ -343,10 +414,10 @@ cd reddit-mcp-buddy
 
 | Feature | Reddit MCP Buddy | Other MCP Tools |
 |---------|-------------|----------------|
-| **Zero Setup** | ✅ Browse instantly; free keys unlock the rest | ❌ Keys required for everything |
+| **Zero Setup** | ✅ Browse instantly; credentials unlock the rest | ❌ Keys required for everything |
 | **Max Rate Limit** | ✅ 100 req/min proven | ❓ Unverified claims |
 | **Language** | TypeScript/Node.js | Python (most) |
-| **Tools Count** | 5 (focused) | 8-10 (redundant) |
+| **Tools Count** | 5 read + 3 opt-in write | 8-10 (redundant) |
 | **Fake Metrics** | ✅ Real data only | ❌ "Sentiment scores" |
 | **Search** | ✅ Full search | Limited or none |
 | **Caching** | ✅ Smart caching | Usually none |
@@ -442,6 +513,12 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 - With full authentication: 100 requests/minute
 - Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
 
+**Write tools don't show up**
+- All of these must hold: `REDDIT_BUDDY_WRITE=true`, all 4 credentials set via environment variables, stdio transport (not `--http`), and a working username/password login
+- The startup log (stderr) names exactly which condition failed
+- `--auth` file setups cannot write: the password is never saved, so restarts fall back to app-only tokens. Move credentials into your MCP client config's `env` block
+- HTTP mode never registers write tools, by design (the HTTP endpoint has no authentication)
+
 **"Subreddit not found"**
 - Check spelling (case-insensitive)
 - Some subreddits may be private or quarantined
@@ -472,6 +549,16 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 | `REDDIT_BUDDY_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the HTTP endpoint | none |
 | `REDDIT_BUDDY_ALLOWED_HOSTS` | Comma-separated `host:port` values accepted in the Host header (DNS-rebinding protection) | loopback values when bound to localhost |
 | `REDDIT_BUDDY_NO_CACHE` | Disable caching (always fetch fresh) | `false` |
+
+#### Posting (v1.2.0)
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REDDIT_BUDDY_WRITE` | Register the [posting tools](#posting-v120) (needs all 4 credentials via env, stdio transport) | `false` |
+| `REDDIT_BUDDY_MAX_POSTS_PER_HOUR` | Posts per hour; only values BELOW 5 are honored | `5` |
+| `REDDIT_BUDDY_MAX_COMMENTS_PER_HOUR` | Comments per hour; only values BELOW 30 are honored | `30` |
+| `REDDIT_BUDDY_MIN_WRITE_INTERVAL_S` | Seconds between writes; only values ABOVE 15 are honored | `15` |
+
+The three rate-floor variables can only tighten the built-in caps. Setting them looser than the defaults does nothing, on purpose.
 
 > **HTTP mode has no authentication.** It binds to localhost so only your machine can reach it, and rejects Host headers outside the loopback set. Setting `REDDIT_BUDDY_HOST=0.0.0.0` exposes it to your whole network - only do that on a trusted network (e.g. inside Docker, which sets it deliberately). On a non-loopback bind the Host check is off by default, since clients legitimately arrive with a container IP or service name; set `REDDIT_BUDDY_ALLOWED_HOSTS` to restrict it. Browser requests are rejected unless their origin is listed in `REDDIT_BUDDY_ALLOWED_ORIGINS`; non-browser clients like Postman are unaffected.
 

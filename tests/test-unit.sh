@@ -137,7 +137,7 @@ SERVER_JSON_VALID=$(node -e "
   const checks = [
     s.name === 'io.github.karanb192/reddit-mcp-buddy',
     Array.isArray(s.packages) && s.packages.length > 0,
-    Array.isArray(s.tools) && s.tools.length === 5,
+    Array.isArray(s.tools) && s.tools.length === 8,
     s.packages[0].transport.type === 'stdio',
     s.packages[0].registryType === 'npm',
     s.packages[0].identifier === 'reddit-mcp-buddy',

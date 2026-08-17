@@ -37,7 +37,7 @@ import {
 
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
-export const SERVER_VERSION = '1.1.14';
+export const SERVER_VERSION = '1.2.0';
 
 // MCP Response validation schemas (per MCP spec)
 const ContentBlockSchema = z.object({
@@ -315,7 +315,12 @@ COMMON QUERIES:
 - "Get comments on a Reddit post" → get_post_details with URL or just post_id
 - "Analyze a Reddit user" → user_analysis with username
 
-Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.`,
+Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.${writeEnabled ? `
+
+POSTING (write tools enabled, acting as u/${services.actingUser}):
+- Safe workflow: subreddit_rules first, then create_post with validate_only:true, then the real create_post
+- Every real submit requires a user confirmation; never try to work around it
+- A hard hourly write cap and a minimum interval between writes apply; when told to wait, wait` : ''}`,
     }
   );
 
