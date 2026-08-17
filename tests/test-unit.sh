@@ -115,6 +115,7 @@ assert "dist/services/content-processor.js exists" "[ -f dist/services/content-p
 assert "dist/services/write-errors.js exists" "[ -f dist/services/write-errors.js ]"
 assert "dist/core/write-gate.js exists" "[ -f dist/core/write-gate.js ]"
 assert "dist/tools/index.js exists" "[ -f dist/tools/index.js ]"
+assert "dist/tools/write.js exists" "[ -f dist/tools/write.js ]"
 
 log_subsection "TypeScript Type Check"
 npm run typecheck 2>&1
@@ -1442,6 +1443,21 @@ WRITEGATE_RESULT=$(node --input-type=module -e '
   delete process.env.REDDIT_BUDDY_MIN_WRITE_INTERVAL_S;
   const t4 = looseCapIgnored && looseIntervalIgnored && tightCapHonored && tightIntervalHonored;
 
+  // t4b: the comment cap env var follows the same tighten-only rule
+  process.env.REDDIT_BUDDY_MAX_COMMENTS_PER_HOUR = "500";
+  t = 1000000;
+  const g5b = new WriteGate(clock);
+  for (let i = 0; i < 30; i++) { g5b.recordWrite("comment"); t += 16000; }
+  const looseCommentsIgnored = !g5b.checkWrite("comment").allowed; // still 30, not 500
+  process.env.REDDIT_BUDDY_MAX_COMMENTS_PER_HOUR = "2";
+  t = 1000000;
+  const g5c = new WriteGate(clock);
+  g5c.recordWrite("comment"); t += 16000;
+  g5c.recordWrite("comment"); t += 16000;
+  const tightCommentsHonored = !g5c.checkWrite("comment").allowed; // env said 2
+  delete process.env.REDDIT_BUDDY_MAX_COMMENTS_PER_HOUR;
+  const t4b = looseCommentsIgnored && tightCommentsHonored;
+
   // t5: idempotency keys normalize whitespace and subreddit case/prefix,
   // replay the stored result inside the window, expire after 15 min
   t = 1000000;
@@ -1480,8 +1496,8 @@ WRITEGATE_RESULT=$(node --input-type=module -e '
   t += 15 * 60 * 1000 + 1;
   const t8 = !before && after && !g9.hasRecentValidatePass(vk);
 
-  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8;
-  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8}));
+  const all = t1 && t2 && t3 && t4 && t4b && t5 && t6 && t7 && t8;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t4b,t5,t6,t7,t8}));
 ' 2>/dev/null)
 assert "WriteGate: interval + caps, env only tightens, idempotency, content guard, validate tracking" "echo \"\$WRITEGATE_RESULT\" | grep -q '^pass$'"
 
@@ -1732,6 +1748,12 @@ WRITEVAL_RESULT=$(node --input-type=module -e '
   const t2 = !ok("all") && !ok("popular") && !ok("a+b")
     && err("all").includes("browse aggregates") && err("a+b").includes("Multireddits") && err("x").length > 0;
 
+  // t2b: over-length, traversal, and query-injection shapes all rejected (a
+  // subreddit name lands in request paths, so nothing URL-shaped may pass)
+  const t2b = !ok("a".repeat(22)) && !ok("u_" + "n".repeat(21))
+    && !ok("../../etc/passwd") && !ok("test/extra")
+    && !ok("test?raw_json=1") && !ok("test&x=1") && !ok("sub reddit");
+
   // t3: kind inference is TOTAL: every combination maps to a kind or a named error
   const kindOf = (p) => { try { return inferPostKind(p); } catch (e) { return "err:" + e.message; } };
   const t3 = kindOf({ body_markdown: "b" }) === "self"
@@ -1782,8 +1804,8 @@ WRITEVAL_RESULT=$(node --input-type=module -e '
   const t9 = !addCommentSchema.safeParse({ post_id: "1abc2d3", text: "  " }).success
     && addCommentSchema.safeParse({ post_id: "1abc2d3", text: "hi" }).success;
 
-  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9;
-  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9}));
+  const all = t1 && t2 && t2b && t3 && t4 && t5 && t6 && t7 && t8 && t9;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t2b,t3,t4,t5,t6,t7,t8,t9}));
 ' 2>/dev/null)
 assert "Write validator strictness, total kind inference, comment target parsing" "echo \"\$WRITEVAL_RESULT\" | grep -q '^pass$'"
 
@@ -1814,8 +1836,39 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   process.env.REDDIT_BUDDY_HTTP = "true";
   globalThis.fetch = async () => { throw new Error("no network expected"); };
   const httpShared = await createSharedServices();
-  const t2 = httpShared.writeStatus.enabled === false && httpShared.writeStatus.reason.includes("stdio");
+  const httpSrv = await createMCPServer(httpShared, { transport: "stdio" });
+  const t2 = httpShared.writeStatus.enabled === false && httpShared.writeStatus.reason.includes("stdio")
+    && (await httpSrv.handlers["tools/list"]()).tools.length === 5;
   delete process.env.REDDIT_BUDDY_HTTP;
+
+  // t2b: app-only credentials (no username/password) are denied by name:
+  // client_credentials tokens carry no user context and cannot post
+  delete process.env.REDDIT_USERNAME;
+  delete process.env.REDDIT_PASSWORD;
+  const appOnly = await createSharedServices();
+  const appOnlySrv = await createMCPServer(appOnly, { transport: "stdio" });
+  const t2b = (await appOnlySrv.handlers["tools/list"]()).tools.length === 5
+    && appOnly.writeStatus.enabled === false
+    && appOnly.writeStatus.reason.includes("REDDIT_USERNAME");
+  process.env.REDDIT_USERNAME = "testuser";
+  process.env.REDDIT_PASSWORD = "testpass";
+
+  // t2c: a failing /me probe denies, and the denial is LOGGED to stderr with
+  // the exact failing condition (the operator must learn why, plan 3.5)
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("/api/v1/me")) return new Response("", { status: 403 });
+    throw new Error("unexpected " + u);
+  };
+  const denialLines = [];
+  const realConsoleError = console.error;
+  console.error = (...a) => { denialLines.push(a.join(" ")); };
+  const probeFail = await createSharedServices();
+  console.error = realConsoleError;
+  const t2c = probeFail.writeStatus.enabled === false
+    && probeFail.writeStatus.reason.includes("probe")
+    && denialLines.some(l => l.includes("NOT enabled") && l.includes("probe"));
 
   // Full eligibility: env creds + write flag + mocked /me probe
   globalThis.fetch = async (url) => {
@@ -1874,8 +1927,8 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   const t7 = dry.valid === true && real.post_id === "p1" && real.status === "live"
     && replay.post_id === "p1" && Array.isArray(replay.warnings);
 
-  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7;
-  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,bytes}));
+  const all = t1 && t2 && t2b && t2c && t3 && t4 && t5 && t6 && t7;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t2b,t2c,t3,t4,t5,t6,t7,bytes}));
 ' 2>/dev/null)
 assert "Registration gating: 5 tools unless eligible+stdio, 8 when eligible, byte budget, shared gate" "echo \"\$WRITEREG_RESULT\" | grep -q '^pass$'"
 
@@ -2038,6 +2091,95 @@ WRITEPIPE_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
 ' 2>/dev/null)
 assert "Write pipeline: preflight matrix, confirmation gate, verify-after-submit, invalidation" "echo \"\$WRITEPIPE_RESULT\" | grep -q '^pass$'"
 
+# --------------------------------------------------------------------------
+# 2af. Write module coverage suite (tests/write-unit.mjs) - NEW v1.2.0
+# --------------------------------------------------------------------------
+# The same file runs under c8 via `npm run test:coverage`, which enforces a
+# 100% line/function/branch/statement floor (per file) on write-gate.js,
+# write-errors.js and tools/write.js. Running it here too keeps one command
+# (this script) running every offline test. It manages its own clean HOME
+# and mocked fetch; nothing touches the network.
+log_subsection "2af. Write Coverage Suite (tests/write-unit.mjs) - NEW v1.2.0"
+
+WRITECOV_RESULT=$(node tests/write-unit.mjs 2>/dev/null)
+echo "  $WRITECOV_RESULT" | head -1
+assert "write-unit.mjs: every assert passes (100% coverage floor enforced by npm run test:coverage)" "echo \"\$WRITECOV_RESULT\" | grep -q '^WRITE-UNIT: pass'"
+
+
+# --------------------------------------------------------------------------
+# 2ag. Server-side elicitation over a real MCP client/server pair - NEW v1.2.0
+# --------------------------------------------------------------------------
+# The only place the makeConfirmer plumbing (getClientCapabilities +
+# server.elicitInput) actually runs: a fake client declares the
+# form-elicitation capability over the SDK's in-memory transport, and only an
+# explicit accept with confirm:true may reach Reddit.
+log_subsection "2ag. Elicitation Confirmation Gate (mcp-server.ts) - NEW v1.2.0"
+
+ELICIT_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
+  import { createSharedServices, createMCPServer } from "./dist/mcp-server.js";
+  import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+  import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+  import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+
+  process.env.REDDIT_CLIENT_ID = "testclientid";
+  process.env.REDDIT_CLIENT_SECRET = "testsecret";
+  process.env.REDDIT_USERNAME = "testuser";
+  process.env.REDDIT_PASSWORD = "testpass";
+  process.env.REDDIT_BUDDY_WRITE = "true";
+
+  const json = (obj) => new Response(JSON.stringify(obj), { status: 200, headers: { "content-type": "application/json" } });
+  let submitCalls = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return json({ access_token: "tok_0123456789", token_type: "bearer", expires_in: 3600, scope: "*" });
+    if (u.includes("/api/v1/me")) return json({ name: "testuser" });
+    if (u.includes("post_requirements")) return json({});
+    if (u.includes("/about.json")) return json({ data: { submission_type: "any" } });
+    if (u.endsWith("/api/submit")) { submitCalls++; return json({ json: { errors: [], data: { id: "p1", name: "t3_p1", url: "https://www.reddit.com/r/test/comments/p1/t/" } } }); }
+    if (u.includes("/api/info.json")) return json({ kind: "Listing", data: { children: [{ kind: "t3", data: { id: "p1", removed_by_category: null } }] } });
+    throw new Error("unexpected " + u);
+  };
+
+  const shared = await createSharedServices();
+  shared.writeTools.verifyDelayMs = 0;
+  const { server } = await createMCPServer(shared, { transport: "stdio" });
+
+  // Fake client that DECLARES the form-elicitation capability and answers
+  // with whatever the test scripted next
+  let answer = { action: "decline" };
+  let lastMessage = "";
+  const client = new Client({ name: "elicit-test", version: "1.0" }, { capabilities: { elicitation: { form: {} } } });
+  client.setRequestHandler(ElicitRequestSchema, async (req) => { lastMessage = req.params.message; return answer; });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([client.connect(ct), server.connect(st)]);
+  const post = (title) => client.callTool({ name: "create_post", arguments: { subreddit: "test", title, body_markdown: "b" } });
+
+  // t1: decline aborts BEFORE any submit, with the echo shown to the human
+  const declined = await post("Declined post");
+  const t1 = declined.isError === true && declined.content[0].text.includes("declined")
+    && submitCalls === 0 && lastMessage.includes("r/test") && lastMessage.includes("u/testuser") && lastMessage.includes("Declined post");
+
+  // t2: cancel aborts too
+  answer = { action: "cancel" };
+  const cancelled = await post("Cancelled post");
+  const t2 = cancelled.isError === true && submitCalls === 0;
+
+  // t3: accept WITHOUT confirm:true still aborts (only an explicit yes posts)
+  answer = { action: "accept", content: { confirm: false } };
+  const halfHearted = await post("Half-hearted post");
+  const t3 = halfHearted.isError === true && submitCalls === 0;
+
+  // t4: accept with confirm:true posts exactly once; declines never armed the
+  // no-elicitation fallback, so this is the FIRST submit
+  answer = { action: "accept", content: { confirm: true } };
+  const posted = JSON.parse((await post("Confirmed post")).content[0].text);
+  const t4 = posted.post_id === "p1" && posted.status === "live" && submitCalls === 1;
+
+  await client.close();
+  const all = t1 && t2 && t3 && t4;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4}));
+' 2>/dev/null)
+assert "Elicitation gate: decline/cancel/soft-accept send nothing, confirmed accept posts once" "echo \"\$ELICIT_RESULT\" | grep -q '^pass$'"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

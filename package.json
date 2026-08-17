@@ -15,6 +15,7 @@
     "start": "node dist/index.js",
     "start:http": "REDDIT_BUDDY_HTTP=true node dist/index.js",
     "test": "bash tests/test-unit.sh",
+    "test:coverage": "npm run build && c8 --include=dist/core/write-gate.js --include=dist/services/write-errors.js --include=dist/tools/write.js --check-coverage --lines 100 --functions 100 --statements 100 --branches 100 --per-file --reporter=text node tests/write-unit.mjs",
     "test:integration": "bash tests/test-integration.sh",
     "test:all": "bash tests/test-unit.sh && bash tests/test-integration.sh",
     "test:rate-limit": "node scripts/rate-limit-tester.cjs",
@@ -58,6 +59,7 @@
     "@types/node": "^20.14.10",
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
+    "c8": "^12.0.0",
     "eslint": "^8.57.0",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3"
