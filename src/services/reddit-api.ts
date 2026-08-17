@@ -12,12 +12,64 @@ import {
 import { AuthManager } from '../core/auth.js';
 import { RateLimiter } from '../core/rate-limiter.js';
 import { CacheManager } from '../core/cache.js';
+import {
+  WriteError,
+  WriteErrorTriple,
+  mapWriteError,
+  mapWriteHttpError,
+  redactWriteError,
+} from './write-errors.js';
 
 export interface RedditAPIOptions {
   authManager: AuthManager;
   rateLimiter: RateLimiter;
   cacheManager: CacheManager;
   timeout?: number;
+}
+
+export interface SubmitPostParams {
+  subreddit: string;
+  kind: 'self' | 'link';
+  title: string;
+  text?: string;
+  url?: string;
+  flair_id?: string;
+  flair_text?: string;
+  resubmit?: boolean;
+  nsfw?: boolean;
+  spoiler?: boolean;
+  send_replies?: boolean;
+}
+
+export interface SubmitPostResult {
+  /** Bare base36 post id (t3_ prefix stripped defensively) */
+  id: string;
+  /** Fullname (t3_<id>) */
+  name: string;
+  /** Full URL of the created post */
+  url: string;
+}
+
+export interface SubmitCommentResult {
+  /** Bare base36 comment id (t1_ prefix stripped defensively) */
+  id: string;
+  /** Absolute-path permalink (/r/sub/comments/...) */
+  permalink: string;
+}
+
+export interface LinkFlair {
+  id: string;
+  text: string;
+  text_editable: boolean;
+  mod_only: boolean;
+}
+
+/** Shape of Reddit's { json: { errors, data } } write envelope */
+interface WriteEnvelope<T> {
+  json?: {
+    errors?: WriteErrorTriple[];
+    data?: T;
+  };
 }
 
 /**
@@ -53,6 +105,9 @@ export class RedditAPI {
   // so a network/IP change heals without a restart.
   private anonJsonBlockedUntil = 0;
   private readonly ANON_JSON_BLOCK_TTL_MS = 15 * 60 * 1000;
+  // Rules-family reads (rules, requirements, about, flairs) share one TTL so
+  // invalidation and expiry behave uniformly across the aggregate rules tool.
+  private readonly RULES_TTL_MS = 15 * 60 * 1000;
 
   constructor(options: RedditAPIOptions) {
     this.auth = options.authManager;
@@ -600,8 +655,330 @@ export class RedditAPI {
     
     const trending = Array.from(subreddits).slice(0, 10);
     this.cache.set(cacheKey, trending);
-    
+
     return trending;
+  }
+
+  // ── Write support (v1.2.0) ─────────────────────────────────────────────────
+  // Writes require OAuth user context and share the read RateLimiter: every
+  // POST consumes a Reddit quota slot exactly like a read does.
+
+  /**
+   * Private: POST transport for Reddit write endpoints.
+   *
+   * CRITICAL: this transport NEVER auto-retries after the request body has
+   * been sent. Reddit offers no idempotency key, so a retry on timeout,
+   * ECONNRESET, 5xx, or anything else post-send risks a duplicate post; the
+   * read path's retry logic (getImpl) is deliberately not reused here. The
+   * only safe rejection is the pre-send rate-limit check. Error text leaving
+   * this transport is redacted (redactWriteError) and HTTP failures map via
+   * mapWriteHttpError; raw response bodies are never echoed.
+   */
+  private async postForm<T>(
+    endpoint: string,
+    form: URLSearchParams,
+    context: { subreddit?: string } = {}
+  ): Promise<T> {
+    // Pre-send rejection is safe: nothing has been transmitted yet.
+    if (!this.rateLimiter.canMakeRequest()) {
+      throw new Error(this.rateLimiter.getErrorMessage(this.auth.isAuthenticated()));
+    }
+
+    // getHeaders() may refresh the OAuth token; still pre-send.
+    const headers = await this.auth.getHeaders();
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    // Record before fetch: the quota slot is spent the moment the request is
+    // transmitted, and a timeout after send still consumed it.
+    this.rateLimiter.recordRequest();
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.oauthUrl}${endpoint}`, {
+        method: 'POST',
+        headers,
+        body: form.toString(),
+        signal: controller.signal,
+      });
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      // Post-send failure: whether Reddit accepted the write is unknowable
+      // here. Surface that honestly instead of retrying; the WriteGate's
+      // idempotency record makes an identical re-issue safe for the caller.
+      if (error.name === 'AbortError') {
+        throw new Error(
+          `Write request timed out after ${this.timeout}ms. The submit may or may not have reached Reddit and was NOT retried automatically. Re-issuing the identical call is safe: a recent duplicate returns the original result.`
+        );
+      }
+      throw new Error(redactWriteError(
+        `Write request failed before a response arrived: ${error?.message || String(error)}. It was NOT retried automatically; re-issue the identical call to check (a recent duplicate returns the original result).`
+      ));
+    }
+    clearTimeout(timeoutId);
+
+    if (response.status === 401) {
+      // Do NOT refresh-and-resubmit: the body was already sent once and a
+      // resubmit could double-post. The next call re-mints the token.
+      throw new Error(
+        'Reddit rejected the write with 401 (expired or invalid token). Not resubmitting automatically; the token refreshes on the next call, so try once more.'
+      );
+    }
+
+    if (!response.ok) {
+      throw mapWriteHttpError(response.status, context.subreddit);
+    }
+
+    try {
+      return await response.json() as T;
+    } catch {
+      throw new Error('Reddit returned a non-JSON response to a write request.');
+    }
+  }
+
+  /**
+   * Submit a self or link post via POST /api/submit.
+   * api_type=json is mandatory: without it Reddit answers with the legacy
+   * jquery response instead of { json: { errors, data } }.
+   */
+  async submitPost(params: SubmitPostParams): Promise<SubmitPostResult> {
+    // Pre-send guard: a link submit without a URL would reach Reddit and
+    // burn a quota slot only to fail with NO_URL.
+    if (params.kind === 'link' && !params.url) {
+      throw new WriteError(mapWriteError([['NO_URL', 'a link post needs a url', 'url']]));
+    }
+
+    const form = new URLSearchParams({
+      api_type: 'json',
+      sr: params.subreddit,
+      kind: params.kind,
+      title: params.title,
+    });
+    // Only include params that are set: Reddit treats an absent field and an
+    // explicit default differently for some settings (e.g. flair).
+    if (params.kind === 'self') {
+      if (params.text !== undefined) form.set('text', params.text);
+    } else {
+      form.set('url', params.url as string);
+    }
+    if (params.send_replies !== undefined) form.set('sendreplies', String(params.send_replies));
+    if (params.resubmit !== undefined) form.set('resubmit', String(params.resubmit));
+    if (params.nsfw !== undefined) form.set('nsfw', String(params.nsfw));
+    if (params.spoiler !== undefined) form.set('spoiler', String(params.spoiler));
+    if (params.flair_id !== undefined) form.set('flair_id', params.flair_id);
+    if (params.flair_text !== undefined) form.set('flair_text', params.flair_text);
+
+    const body = await this.postForm<WriteEnvelope<{ id?: string; name?: string; url?: string }>>(
+      '/api/submit',
+      form,
+      { subreddit: params.subreddit }
+    );
+
+    const errors = body?.json?.errors ?? [];
+    if (errors.length > 0) {
+      throw new WriteError(mapWriteError(errors));
+    }
+
+    const data = body?.json?.data;
+    if (!data?.url) {
+      throw new Error('Reddit accepted the submit but returned no post data (unexpected response shape).');
+    }
+    // id is ALWAYS the bare base36 id: strip a t3_ prefix defensively in case
+    // only the fullname is present (the gallery endpoint returns fullnames).
+    const id = String(data.id ?? data.name ?? '').replace(/^t3_/, '');
+    return { id, name: data.name ?? `t3_${id}`, url: data.url };
+  }
+
+  /**
+   * Submit a comment or reply via POST /api/comment.
+   * thingId is a fullname: t3_<post> for a top-level comment, t1_<comment>
+   * for a reply. The success payload lives at json.data.things[0].data.
+   */
+  async submitComment(thingId: string, text: string): Promise<SubmitCommentResult> {
+    const form = new URLSearchParams({
+      api_type: 'json',
+      thing_id: thingId,
+      text,
+    });
+
+    const body = await this.postForm<WriteEnvelope<{ things?: Array<{ data?: { id?: string; permalink?: string } }> }>>(
+      '/api/comment',
+      form
+    );
+
+    const errors = body?.json?.errors ?? [];
+    if (errors.length > 0) {
+      throw new WriteError(mapWriteError(errors));
+    }
+
+    const thing = body?.json?.data?.things?.[0]?.data;
+    if (!thing?.id) {
+      throw new Error('Reddit accepted the comment but returned no comment data (unexpected response shape).');
+    }
+    const id = String(thing.id).replace(/^t1_/, '');
+    // Absolute-path permalink: strip any scheme+host Reddit may prepend
+    const permalink = String(thing.permalink ?? '').replace(/^https?:\/\/[^/]+/, '');
+    return { id, permalink };
+  }
+
+  /**
+   * Raw subreddit rules via GET /r/{sub}/about/rules.json. Read traffic:
+   * normal retry behavior applies (only the POST transport forbids retry).
+   */
+  async getSubredditRulesRaw(subreddit: string): Promise<any> {
+    const cacheKey = CacheManager.createKey('rules', subreddit, 'rules');
+    const cached = this.cache.get<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const data = await this.get<any>(`/r/${encodeURIComponent(subreddit)}/about/rules.json`);
+    this.cache.set(cacheKey, data, this.RULES_TTL_MS);
+    return data;
+  }
+
+  /**
+   * Posting requirements via GET /api/v1/{sub}/post_requirements (needs
+   * OAuth with the submit scope). Returns null instead of throwing on
+   * 403/404: profile (u_) subreddits have no requirements endpoint, and the
+   * tool layer reports "unavailable for profile subreddits". The null is
+   * cached too, so repeat rules calls for a profile sub cost zero requests.
+   */
+  async getPostRequirements(subreddit: string): Promise<Record<string, unknown> | null> {
+    const cacheKey = CacheManager.createKey('rules', subreddit, 'requirements');
+    // Wrapper object so a cached "unavailable" (null) is distinguishable
+    // from a cache miss (cache.get returns null for both otherwise).
+    const cached = this.cache.get<{ requirements: Record<string, unknown> | null }>(cacheKey);
+    if (cached) {
+      return cached.requirements;
+    }
+
+    let requirements: Record<string, unknown> | null = null;
+    try {
+      requirements = await this.get<Record<string, unknown>>(
+        `/api/v1/${encodeURIComponent(subreddit)}/post_requirements`
+      );
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status !== 403 && status !== 404) {
+        throw error;
+      }
+    }
+    this.cache.set(cacheKey, { requirements }, this.RULES_TTL_MS);
+    return requirements;
+  }
+
+  /**
+   * Full about.json data for a subreddit, cached under the rules family so
+   * the aggregate rules tool's reads expire and invalidate uniformly.
+   * (getSubreddit() exists but caches under its own key/TTL; the rules tool
+   * needs capability flags like submission_type on the rules TTL.)
+   */
+  async getSubredditAboutFull(subreddit: string): Promise<any> {
+    const cacheKey = CacheManager.createKey('rules', subreddit, 'about');
+    const cached = this.cache.get<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const resp = await this.get<{ data: any }>(`/r/${encodeURIComponent(subreddit)}/about.json`);
+    const about = resp.data;
+    this.cache.set(cacheKey, about, this.RULES_TTL_MS);
+    return about;
+  }
+
+  /**
+   * Link flair choices via GET /r/{sub}/api/link_flair_v2.json. That endpoint
+   * 403s for non-privileged users in some subreddits, so fall back to the
+   * flairselector POST (which serves the selectable choices to anyone who can
+   * post) and adapt to the same shape. Returns [] when flairs are disabled.
+   */
+  async getLinkFlairs(subreddit: string): Promise<LinkFlair[]> {
+    const cacheKey = CacheManager.createKey('rules', subreddit, 'flairs');
+    const cached = this.cache.get<LinkFlair[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    let flairs: LinkFlair[] = [];
+    try {
+      const raw = await this.get<any[]>(`/r/${encodeURIComponent(subreddit)}/api/link_flair_v2.json`);
+      flairs = Array.isArray(raw)
+        ? raw.map(f => ({
+            id: String(f.id ?? ''),
+            text: String(f.text ?? ''),
+            text_editable: !!f.text_editable,
+            mod_only: !!f.mod_only,
+          }))
+        : [];
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 403) {
+        flairs = await this.getFlairsViaSelector(subreddit);
+      } else if (status === 404) {
+        flairs = []; // flairs disabled for this subreddit
+      } else {
+        throw error;
+      }
+    }
+
+    this.cache.set(cacheKey, flairs, this.RULES_TTL_MS);
+    return flairs;
+  }
+
+  /**
+   * Private: flairselector fallback. A POST, but read-shaped (it creates
+   * nothing), so routing it through the no-retry transport is safe. Any
+   * failure means "no flair choices available", never a fatal error: the
+   * rules tool degrades to an availability note instead.
+   */
+  private async getFlairsViaSelector(subreddit: string): Promise<LinkFlair[]> {
+    try {
+      // name omitted from the form: that selects flair choices for a new link
+      const data = await this.postForm<{ choices?: any[] }>(
+        `/r/${encodeURIComponent(subreddit)}/api/flairselector`,
+        new URLSearchParams(),
+        { subreddit }
+      );
+      const choices = data?.choices;
+      if (!Array.isArray(choices)) {
+        return [];
+      }
+      return choices.map(c => ({
+        id: String(c.flair_template_id ?? ''),
+        text: String(c.flair_text ?? ''),
+        text_editable: !!c.flair_text_editable,
+        // flairselector only serves choices the user may apply
+        mod_only: false,
+      }));
+    } catch {
+      return []; // flairs disabled (empty/non-JSON body) or inaccessible
+    }
+  }
+
+  /**
+   * Identity via GET /api/v1/me, deliberately uncached: this is the startup
+   * probe proving the token carries real user context. App-only
+   * (client_credentials) tokens have no user identity and cannot post.
+   */
+  async getMe(): Promise<any> {
+    return this.get<any>('/api/v1/me');
+  }
+
+  /**
+   * Fresh post lookup via GET /api/info.json, BYPASSING the cache entirely:
+   * verify-after-submit must see Reddit's current state (removed_by_category
+   * lands seconds after submit), never a pre-write cached listing.
+   * Returns the first child's data, or null when the post is not found.
+   */
+  async getPostInfoFresh(fullnameOrId: string): Promise<RedditPost | null> {
+    const id = fullnameOrId.replace(/^t3_/, '');
+    const data = await this.get<RedditListing<RedditPost>>(
+      `/api/info.json?id=t3_${encodeURIComponent(id)}`
+    );
+    return data?.data?.children?.[0]?.data ?? null;
   }
 
   /**

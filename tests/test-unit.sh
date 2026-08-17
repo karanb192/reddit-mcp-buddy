@@ -112,6 +112,8 @@ assert "dist/core/cache.js exists" "[ -f dist/core/cache.js ]"
 assert "dist/core/rate-limiter.js exists" "[ -f dist/core/rate-limiter.js ]"
 assert "dist/services/reddit-api.js exists" "[ -f dist/services/reddit-api.js ]"
 assert "dist/services/content-processor.js exists" "[ -f dist/services/content-processor.js ]"
+assert "dist/services/write-errors.js exists" "[ -f dist/services/write-errors.js ]"
+assert "dist/core/write-gate.js exists" "[ -f dist/core/write-gate.js ]"
 assert "dist/tools/index.js exists" "[ -f dist/tools/index.js ]"
 
 log_subsection "TypeScript Type Check"
@@ -1340,6 +1342,372 @@ TOOLDEF_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5}));
 ' 2>/dev/null)
 assert "Tool definitions: 5 tools, readOnlyHint under annotations, schemas intact" "echo \"\$TOOLDEF_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2y. Cache deleteByPrefix: write-through invalidation support (cache.ts) - NEW v1.2.0
+# --------------------------------------------------------------------------
+log_subsection "2y. Cache deleteByPrefix (cache.ts) - NEW v1.2.0"
+
+DELPREFIX_RESULT=$(node --input-type=module -e '
+  import { CacheManager } from "./dist/core/cache.js";
+
+  const c = new CacheManager();
+  c.set("subreddit:test:hot", { a: 1 });
+  c.set("subreddit:test:new", { a: 2 });
+  c.set("subreddit:testing:hot", { a: 3 }); // prefix must not match sibling sub
+  c.set("post:test:1abc:best", { a: 4 });
+  const sizeBefore = c.getStats().sizeUsed;
+
+  // t1: removes exactly the matching entries and returns the count
+  const removed = c.deleteByPrefix("subreddit:test:");
+  const t1 = removed === 2 && c.get("subreddit:test:hot") === null && c.get("subreddit:test:new") === null;
+
+  // t2: non-matching entries survive (including the sibling-prefix trap)
+  const t2 = c.get("subreddit:testing:hot") !== null && c.get("post:test:1abc:best") !== null;
+
+  // t3: sizeUsed shrinks (delete() bookkeeping maintained), entries correct
+  const stats = c.getStats();
+  const t3 = stats.entries === 2 && stats.sizeUsed < sizeBefore;
+
+  // t4: no match returns 0
+  const t4 = c.deleteByPrefix("nosuchprefix:") === 0;
+
+  // t5: prefixes built via createKey line up with keys stored via createKey
+  // (createKey lowercases, so a raw mixed-case prefix would silently miss)
+  c.set(CacheManager.createKey("subreddit", "MachineLearning", "hot"), { a: 5 });
+  const t5 = c.deleteByPrefix(CacheManager.createKey("subreddit", "MachineLearning") + ":") === 1;
+
+  const all = t1 && t2 && t3 && t4 && t5;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5}));
+' 2>/dev/null)
+assert "deleteByPrefix: exact prefix match, sizeUsed maintained, createKey normalization" "echo \"\$DELPREFIX_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2z. WriteGate: rate floor, idempotency, content guard (write-gate.ts) - NEW v1.2.0
+# --------------------------------------------------------------------------
+log_subsection "2z. WriteGate (core/write-gate.ts) - NEW v1.2.0"
+
+WRITEGATE_RESULT=$(node --input-type=module -e '
+  import { WriteGate } from "./dist/core/write-gate.js";
+
+  const HOUR = 60 * 60 * 1000;
+  let t = 1000000;
+  const clock = { now: () => t };
+
+  // t1: minimum 15s interval between ANY writes, with waitSeconds surfaced
+  const g1 = new WriteGate(clock);
+  const a = g1.checkWrite("post");
+  g1.recordWrite("post");
+  const b = g1.checkWrite("comment"); // interval applies across kinds
+  t += 16000;
+  const c = g1.checkWrite("comment");
+  const t1 = a.allowed && !b.allowed && b.waitSeconds === 15 && c.allowed;
+
+  // t2: post cap of 5/hour enforced, frees when the oldest slot expires
+  t = 1000000;
+  const g2 = new WriteGate(clock);
+  for (let i = 0; i < 5; i++) { g2.recordWrite("post"); t += 16000; }
+  const blocked = g2.checkWrite("post");
+  const commentsStillOk = g2.checkWrite("comment"); // caps are per-kind
+  t += HOUR; // oldest post now outside the sliding window
+  const freed = g2.checkWrite("post");
+  const t2 = !blocked.allowed && blocked.waitSeconds > 0 && commentsStillOk.allowed && freed.allowed;
+
+  // t3: comment cap of 30/hour enforced
+  t = 1000000;
+  const g3 = new WriteGate(clock);
+  for (let i = 0; i < 30; i++) { g3.recordWrite("comment"); t += 16000; }
+  const t3 = !g3.checkWrite("comment").allowed && g3.checkWrite("post").allowed;
+
+  // t4: env can only TIGHTEN, never loosen (the non-bypassable floor)
+  process.env.REDDIT_BUDDY_MAX_POSTS_PER_HOUR = "100";
+  process.env.REDDIT_BUDDY_MIN_WRITE_INTERVAL_S = "1";
+  t = 1000000;
+  const g4 = new WriteGate(clock);
+  for (let i = 0; i < 5; i++) { g4.recordWrite("post"); t += 16000; }
+  const looseCapIgnored = !g4.checkWrite("post").allowed; // still 5, not 100
+  g4.recordWrite("comment");
+  t += 2000; // past the loosened 1s, inside the real 15s floor
+  const looseIntervalIgnored = !g4.checkWrite("comment").allowed;
+  process.env.REDDIT_BUDDY_MAX_POSTS_PER_HOUR = "2";
+  process.env.REDDIT_BUDDY_MIN_WRITE_INTERVAL_S = "60";
+  t = 1000000;
+  const g5 = new WriteGate(clock);
+  g5.recordWrite("post"); t += 61000;
+  g5.recordWrite("post"); t += 61000;
+  const tightCapHonored = !g5.checkWrite("post").allowed; // env said 2
+  g5.recordWrite("comment"); t += 20000; // past 15s floor, inside env 60s
+  const tightIntervalHonored = !g5.checkWrite("comment").allowed;
+  delete process.env.REDDIT_BUDDY_MAX_POSTS_PER_HOUR;
+  delete process.env.REDDIT_BUDDY_MIN_WRITE_INTERVAL_S;
+  const t4 = looseCapIgnored && looseIntervalIgnored && tightCapHonored && tightIntervalHonored;
+
+  // t5: idempotency keys normalize whitespace and subreddit case/prefix,
+  // replay the stored result inside the window, expire after 15 min
+  t = 1000000;
+  const g6 = new WriteGate(clock);
+  const k1 = g6.makePostKey("Test", "self", "Hello  World", "body");
+  const k2 = g6.makePostKey("r/test", "self", "Hello World", "body");
+  const kDiff = g6.makePostKey("test", "self", "hello world", "body"); // case change = new content
+  g6.recordSubmit(k1, { post_id: "abc", url: "https://reddit.com/x" });
+  const replay = g6.findRecentSubmit(k2);
+  const inWindow = k1 === k2 && kDiff !== k1 && replay && replay.post_id === "abc";
+  t += 15 * 60 * 1000 + 1;
+  const t5 = inWindow && g6.findRecentSubmit(k1) === null;
+
+  // t6: comment idempotency key
+  t = 1000000;
+  const g7 = new WriteGate(clock);
+  g7.recordSubmit(g7.makeCommentKey("t3_abc", "nice  post"), { comment_id: "def" });
+  const cr = g7.findRecentSubmit(g7.makeCommentKey("t3_abc", "nice post"));
+  const t6 = cr && cr.comment_id === "def";
+
+  // t7: same-sub duplicate content guard returns the stored post
+  t = 1000000;
+  const g8 = new WriteGate(clock);
+  g8.recordContent("test", "My Title", "My body", { post_id: "xyz", url: "u" });
+  const dup = g8.findDuplicateContent("TEST", "My  Title", "My body");
+  const otherSub = g8.findDuplicateContent("other", "My Title", "My body");
+  const t7 = dup && dup.post_id === "xyz" && otherSub === null;
+
+  // t8: validate-pass tracking (enforced dry-run fallback) with expiry
+  t = 1000000;
+  const g9 = new WriteGate(clock);
+  const vk = g9.makePostKey("test", "self", "title", "body");
+  const before = g9.hasRecentValidatePass(vk);
+  g9.recordValidatePass(vk);
+  const after = g9.hasRecentValidatePass(vk);
+  t += 15 * 60 * 1000 + 1;
+  const t8 = !before && after && !g9.hasRecentValidatePass(vk);
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8}));
+' 2>/dev/null)
+assert "WriteGate: interval + caps, env only tightens, idempotency, content guard, validate tracking" "echo \"\$WRITEGATE_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2aa. Write error mapping + secret redaction (write-errors.ts) - NEW v1.2.0
+# --------------------------------------------------------------------------
+log_subsection "2aa. Write Error Mapping (services/write-errors.ts) - NEW v1.2.0"
+
+WRITEERR_RESULT=$(node --input-type=module -e '
+  import { mapWriteError, mapWriteHttpError, redactWriteError, WriteError } from "./dist/services/write-errors.js";
+
+  // t1: RATELIMIT parses "try again in N minutes" into waitMinutes
+  const rl = mapWriteError([["RATELIMIT", "you are doing that too much. try again in 7 minutes.", "ratelimit"]]);
+  const t1 = rl.code === "RATELIMIT" && rl.waitMinutes === 7 && rl.retryable === true && rl.guidance.includes("7");
+
+  // t2: seconds phrasing rounds up to at least 1 minute (never understates)
+  const rls = mapWriteError([["RATELIMIT", "take a break for 30 seconds before trying again.", "ratelimit"]]);
+  const t2 = rls.waitMinutes === 1;
+
+  // t3: ALREADY_SUB suggests resubmit: true
+  const as = mapWriteError([["ALREADY_SUB", "that link has already been submitted", "url"]]);
+  const t3 = as.suggestResubmit === true && as.guidance.includes("resubmit");
+
+  // t4: full table coverage with correct retryability
+  const codes = ["SUBMIT_VALIDATION_FLAIR_REQUIRED", "SUBREDDIT_NOTALLOWED", "NO_URL", "BAD_URL", "THREAD_LOCKED", "TOO_OLD", "DELETED_LINK", "DELETED_COMMENT"];
+  const mapped = codes.map(code => mapWriteError([[code, "msg", null]]));
+  const stopCodes = ["SUBREDDIT_NOTALLOWED", "THREAD_LOCKED", "TOO_OLD", "DELETED_LINK", "DELETED_COMMENT"];
+  const t4 = mapped.every((m, i) => m.code === codes[i] && m.retryable === !stopCodes.includes(codes[i]));
+
+  // t5: unknown triples name type+field but never echo the message text
+  const unk = mapWriteError([["WEIRD_ERR", "raw internals that must not surface", "field_x"]]);
+  const t5 = unk.code === "WEIRD_ERR" && unk.message.includes("field_x") && !unk.message.includes("internals") && unk.retryable === false;
+
+  // t6: a known triple in second position still wins over an unknown first
+  const second = mapWriteError([["WEIRD_ERR", "x", null], ["RATELIMIT", "try again in 2 minutes.", null]]);
+  const t6 = second.code === "RATELIMIT" && second.waitMinutes === 2;
+
+  // t7: write-path 403/404 mapping, never the read-path advice
+  const h403 = mapWriteHttpError(403, "somesub");
+  const h404 = mapWriteHttpError(404, "somesub");
+  const t7 = h403 instanceof WriteError
+    && h403.write.message.includes("Cannot post to r/somesub")
+    && h403.write.message.includes("private, quarantined, or banned")
+    && !h403.message.includes("r/programming")
+    && h404.write.retryable === false;
+
+  // t8: 5xx mapping admits ambiguity (write may have landed), no auto-retry advice
+  const h500 = mapWriteHttpError(500, "somesub");
+  const t8 = h500.write.code === "HTTP_500" && h500.write.message.includes("may or may not");
+
+  // t9: redaction scrubs S3 lease, websocket, and bearer secrets but keeps labels
+  const dirty = [
+    "X-Amz-Signature=aabbccdd112233",
+    "\"policy\":\"eyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMSJ9pad\"",
+    "\"websocket_url\":\"wss://k8s.wss.redditmedia.com/link_1?m=SECRETTOKEN\"",
+    "Authorization: Bearer abc.def-ghi_jkl",
+  ].join(" ");
+  const clean = redactWriteError(dirty);
+  const t9 = !clean.includes("aabbccdd112233")
+    && !clean.includes("eyJleHBpcmF0aW9u")
+    && !clean.includes("SECRETTOKEN")
+    && !clean.includes("abc.def-ghi_jkl")
+    && clean.includes("X-Amz-Signature")
+    && clean.includes("[REDACTED]");
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9}));
+' 2>/dev/null)
+assert "Write errors: triple table, RATELIMIT wait parse, unknown formatter, HTTP map, redaction" "echo \"\$WRITEERR_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2ab. Write transport: no post-send retry, submit parsing, fresh reads - NEW v1.2.0
+# --------------------------------------------------------------------------
+log_subsection "2ab. Write Transport (reddit-api.ts, mocked fetch) - NEW v1.2.0"
+
+WRITEAPI_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
+  import { AuthManager } from "./dist/core/auth.js";
+  import { RateLimiter } from "./dist/core/rate-limiter.js";
+  import { CacheManager } from "./dist/core/cache.js";
+  import { RedditAPI } from "./dist/services/reddit-api.js";
+
+  process.env.REDDIT_CLIENT_ID = "testclientid";
+  process.env.REDDIT_CLIENT_SECRET = "testsecret";
+  process.env.REDDIT_USERNAME = "testuser";
+  process.env.REDDIT_PASSWORD = "testpass";
+
+  const token = () => new Response(JSON.stringify({ access_token: "tok_0123456789", token_type: "bearer", expires_in: 3600, scope: "*" }), { status: 200, headers: { "content-type": "application/json" } });
+  const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
+  const mkApi = async () => {
+    const auth = new AuthManager();
+    await auth.load();
+    return new RedditAPI({ authManager: auth, rateLimiter: new RateLimiter({ limit: 1000, window: 60000, name: "t" }), cacheManager: new CacheManager(), timeout: 2000 });
+  };
+
+  // t1: submitPost sends the right form fields and returns the bare id;
+  // unset optionals (resubmit, flair) are absent from the form
+  let submitBody = ""; let calls1 = 0;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.endsWith("/api/submit")) { calls1++; submitBody = init.body; return json({ json: { errors: [], data: { id: "abc123", name: "t3_abc123", url: "https://www.reddit.com/r/test/comments/abc123/hello/" } } }); }
+    throw new Error("unexpected " + u);
+  };
+  const res1 = await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "Hello", text: "Body", send_replies: true });
+  const p1 = new URLSearchParams(submitBody);
+  const t1 = res1.id === "abc123" && res1.url.includes("/comments/abc123/")
+    && p1.get("api_type") === "json" && p1.get("sr") === "test" && p1.get("kind") === "self"
+    && p1.get("text") === "Body" && p1.get("sendreplies") === "true"
+    && p1.get("resubmit") === null && p1.get("flair_id") === null && calls1 === 1;
+
+  // t2: CRITICAL: network failure after send is NEVER retried (1 attempt),
+  // and the error says so instead of pretending the outcome is known
+  let calls2 = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.endsWith("/api/submit")) { calls2++; const e = new TypeError("fetch failed"); e.cause = { code: "ECONNRESET" }; throw e; }
+    throw new Error("unexpected");
+  };
+  let err2 = "";
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err2 = e.message; }
+  const t2 = calls2 === 1 && err2.includes("NOT retried");
+
+  // t3: 5xx after send: one attempt, mapped WriteError admitting ambiguity,
+  // response body never echoed
+  let calls3 = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.endsWith("/api/submit")) { calls3++; return new Response("leaky-body", { status: 500 }); }
+    throw new Error("unexpected");
+  };
+  let err3 = null;
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err3 = e; }
+  const t3 = calls3 === 1 && err3.write.code === "HTTP_500" && err3.message.includes("may or may not") && !err3.message.includes("leaky-body");
+
+  // t4: 401 is surfaced without a resubmit (token refresh happens next call)
+  let calls4 = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.endsWith("/api/submit")) { calls4++; return new Response("", { status: 401 }); }
+    throw new Error("unexpected");
+  };
+  let err4 = "";
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err4 = e.message; }
+  const t4 = calls4 === 1 && err4.includes("401");
+
+  // t5: error triples inside an HTTP 200 become a mapped WriteError
+  globalThis.fetch = async (url) => String(url).includes("access_token") ? token() : json({ json: { errors: [["RATELIMIT", "try again in 7 minutes.", "ratelimit"]] } });
+  let err5 = null;
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err5 = e; }
+  const t5 = err5.write.code === "RATELIMIT" && err5.write.waitMinutes === 7;
+
+  // t6: write-path 403 maps to "cannot post", not read-path advice
+  globalThis.fetch = async (url) => String(url).includes("access_token") ? token() : new Response("", { status: 403 });
+  let err6 = null;
+  try { await (await mkApi()).submitPost({ subreddit: "privsub", kind: "self", title: "x" }); } catch (e) { err6 = e; }
+  const t6 = err6.write.code === "HTTP_403" && err6.message.includes("Cannot post to r/privsub") && !err6.message.includes("r/programming");
+
+  // t7: submitComment parses json.data.things[0].data, bare id + path permalink
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.endsWith("/api/comment")) return json({ json: { errors: [], data: { things: [{ data: { id: "t1_def456", permalink: "https://www.reddit.com/r/test/comments/abc/x/def456/" } }] } } });
+    throw new Error("unexpected");
+  };
+  const res7 = await (await mkApi()).submitComment("t3_abc123", "nice");
+  const t7 = res7.id === "def456" && res7.permalink === "/r/test/comments/abc/x/def456/";
+
+  // t8: getPostInfoFresh NEVER caches (verify-after-submit must be fresh)
+  let infoCalls = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("/api/info.json")) { infoCalls++; return json({ kind: "Listing", data: { children: [{ kind: "t3", data: { id: "abc123", removed_by_category: null } }] } }); }
+    throw new Error("unexpected");
+  };
+  const api8 = await mkApi();
+  await api8.getPostInfoFresh("t3_abc123");
+  const fresh = await api8.getPostInfoFresh("abc123");
+  const t8 = infoCalls === 2 && fresh.id === "abc123";
+
+  // t9: getLinkFlairs falls back to flairselector on 403 and caches the result
+  let v2Calls = 0; let selCalls = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("link_flair_v2")) { v2Calls++; return new Response("", { status: 403 }); }
+    if (u.includes("flairselector")) { selCalls++; return json({ choices: [{ flair_template_id: "f1", flair_text: "News", flair_text_editable: false }] }); }
+    throw new Error("unexpected " + u);
+  };
+  const api9 = await mkApi();
+  const flairs = await api9.getLinkFlairs("test");
+  await api9.getLinkFlairs("test"); // second call must hit the cache
+  const t9 = flairs.length === 1 && flairs[0].id === "f1" && flairs[0].mod_only === false && v2Calls === 1 && selCalls === 1;
+
+  // t10: post_requirements 403 (profile subs) returns null and caches the null
+  let reqCalls = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("post_requirements")) { reqCalls++; return new Response("", { status: 403 }); }
+    throw new Error("unexpected");
+  };
+  const api10 = await mkApi();
+  const r10a = await api10.getPostRequirements("u_someone");
+  const r10b = await api10.getPostRequirements("u_someone");
+  const t10 = r10a === null && r10b === null && reqCalls === 1;
+
+  // t11: link submit without url fails PRE-send (zero requests spent)
+  let calls11 = 0;
+  globalThis.fetch = async () => { calls11++; return token(); };
+  let err11 = null;
+  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "link", title: "x" }); } catch (e) { err11 = e; }
+  const t11 = err11.write.code === "NO_URL" && calls11 === 0;
+
+  // t12: auth exposes env-credential provenance and acting username
+  const auth12 = new AuthManager();
+  await auth12.load();
+  const t12 = auth12.credentialsFromEnv() === true && auth12.getUsername() === "testuser";
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 && t11 && t12;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12}));
+' 2>/dev/null)
+assert "Write transport: no post-send retry, envelope parsing, fresh info read, flair fallback" "echo \"\$WRITEAPI_RESULT\" | grep -q '^pass$'"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
