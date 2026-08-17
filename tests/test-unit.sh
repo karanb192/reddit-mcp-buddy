@@ -1709,6 +1709,335 @@ WRITEAPI_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
 ' 2>/dev/null)
 assert "Write transport: no post-send retry, envelope parsing, fresh info read, flair fallback" "echo \"\$WRITEAPI_RESULT\" | grep -q '^pass$'"
 
+# --------------------------------------------------------------------------
+# 2ac. Write validator, kind inference, comment target resolution - NEW v1.2.0
+# --------------------------------------------------------------------------
+log_subsection "2ac. Write Validator + Kind Inference + Comment Targets (tools/write.ts) - NEW v1.2.0"
+
+WRITEVAL_RESULT=$(node --input-type=module -e '
+  import {
+    writeSubredditName, createPostSchema, addCommentSchema, subredditRulesSchema,
+    inferPostKind, resolveCommentTarget, parseCommentUrl,
+  } from "./dist/tools/write.js";
+
+  const sub = writeSubredditName("d");
+  const ok = (v) => sub.safeParse(v).success;
+  const err = (v) => { const r = sub.safeParse(v); return r.success ? "" : r.error.errors[0].message; };
+
+  // t1: STRICT validator accepts one real sub / u_ profile, strips r/ prefix
+  const t1 = ok("test") && ok("MachineLearning") && ok("u_some-user") && sub.parse("r/Test") === "Test";
+
+  // t2: rejects all/popular/multireddits with ACTIONABLE messages (the browse
+  // validator accepts all of these, which is exactly the bug being closed)
+  const t2 = !ok("all") && !ok("popular") && !ok("a+b")
+    && err("all").includes("browse aggregates") && err("a+b").includes("Multireddits") && err("x").length > 0;
+
+  // t3: kind inference is TOTAL: every combination maps to a kind or a named error
+  const kindOf = (p) => { try { return inferPostKind(p); } catch (e) { return "err:" + e.message; } };
+  const t3 = kindOf({ body_markdown: "b" }) === "self"
+    && kindOf({}) === "self"
+    && kindOf({ link_url: "https://x.com" }) === "link"
+    && kindOf({ link_url: "https://x.com", body_markdown: "b" }).includes("link posts carry no body")
+    && kindOf({ media: [] }).includes("v1.3.0")
+    && kindOf({ media: [{ name: "a", path: "/x" }], link_url: "https://x.com" }).includes("v1.3.0")
+    && kindOf({ poster_path: "/x.png" }).includes("v1.3.0");
+
+  // t4: createPostSchema bounds: title 1..300, link_url must be http(s)
+  const t4 = !createPostSchema.safeParse({ subreddit: "test", title: "x".repeat(301) }).success
+    && !createPostSchema.safeParse({ subreddit: "test", title: "  " }).success
+    && !createPostSchema.safeParse({ subreddit: "test", title: "t", link_url: "notaurl" }).success
+    && !createPostSchema.safeParse({ subreddit: "test", title: "t", link_url: "ftp://x.com/f" }).success
+    && createPostSchema.parse({ subreddit: "test", title: "t" }).send_replies === true
+    && createPostSchema.parse({ subreddit: "test", title: "t" }).resubmit === false;
+
+  // t5: exactly one comment target; ambiguity and absence produce clear errors
+  const resolve = (p) => { try { return resolveCommentTarget(p); } catch (e) { return "err:" + e.message; } };
+  const t5 = resolve({ post_id: "t3_1abc2d3" }).thingId === "t3_1abc2d3"
+    && resolve({ comment_id: "def456" }).thingId === "t1_def456"
+    && String(resolve({ post_id: "a1", comment_id: "b2" })).includes("exactly ONE")
+    && String(resolve({})).includes("exactly one")
+    && String(resolve({ post_id: "!!!" })).includes("Invalid post_id");
+
+  // t6: URL parser captures BOTH post id and optional trailing comment id,
+  // strips query/fragment, accepts subdomains and /user/ profile paths
+  const u1 = parseCommentUrl("https://www.reddit.com/r/test/comments/1abc2d3/some_slug/xyz789/?context=3#top");
+  const u2 = parseCommentUrl("https://old.reddit.com/r/test/comments/1abc2d3/some_slug/");
+  const u3 = parseCommentUrl("reddit.com/comments/1abc2d3");
+  const u4 = parseCommentUrl("https://www.reddit.com/user/some-user/comments/1abc2d3/title/");
+  const t6 = u1.thingId === "t1_xyz789" && u1.subreddit === "test" && u1.postId === "1abc2d3"
+    && u2.thingId === "t3_1abc2d3"
+    && u3.thingId === "t3_1abc2d3" && u3.subreddit === undefined
+    && u4.thingId === "t3_1abc2d3" && u4.subreddit === "u_some-user";
+
+  // t7: redd.it short links are REJECTED (ambiguous), never guessed
+  let e7 = "";
+  try { parseCommentUrl("https://redd.it/1abc2d3"); } catch (e) { e7 = e.message; }
+  const t7 = e7.includes("redd.it") && e7.includes("ambiguous");
+
+  // t8: subreddit_rules uses the STRICT validator too
+  const t8 = !subredditRulesSchema.safeParse({ subreddit: "all" }).success
+    && subredditRulesSchema.safeParse({ subreddit: "test" }).success;
+
+  // t9: addComment text must be non-empty
+  const t9 = !addCommentSchema.safeParse({ post_id: "1abc2d3", text: "  " }).success
+    && addCommentSchema.safeParse({ post_id: "1abc2d3", text: "hi" }).success;
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9}));
+' 2>/dev/null)
+assert "Write validator strictness, total kind inference, comment target parsing" "echo \"\$WRITEVAL_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2ad. Write registration gating + byte budget + shared gate - NEW v1.2.0
+# --------------------------------------------------------------------------
+log_subsection "2ad. Write Registration Gating (mcp-server.ts) - NEW v1.2.0"
+
+WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
+  import { createSharedServices, createMCPServer } from "./dist/mcp-server.js";
+
+  const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
+  const token = () => json({ access_token: "tok_0123456789", token_type: "bearer", expires_in: 3600, scope: "*" });
+
+  // t1: write requested but NO credentials: 5 tools, reason names the failure
+  process.env.REDDIT_BUDDY_WRITE = "true";
+  const bare = await createSharedServices();
+  const bareSrv = await createMCPServer(bare, { transport: "stdio" });
+  const bareTools = (await bareSrv.handlers["tools/list"]()).tools;
+  const t1 = bareTools.length === 5 && bare.writeStatus.enabled === false
+    && bare.writeStatus.reason.includes("credentials");
+
+  // t2: HTTP mode env denies even with full creds (no /me probe attempted)
+  process.env.REDDIT_CLIENT_ID = "testclientid";
+  process.env.REDDIT_CLIENT_SECRET = "testsecret";
+  process.env.REDDIT_USERNAME = "testuser";
+  process.env.REDDIT_PASSWORD = "testpass";
+  process.env.REDDIT_BUDDY_HTTP = "true";
+  globalThis.fetch = async () => { throw new Error("no network expected"); };
+  const httpShared = await createSharedServices();
+  const t2 = httpShared.writeStatus.enabled === false && httpShared.writeStatus.reason.includes("stdio");
+  delete process.env.REDDIT_BUDDY_HTTP;
+
+  // Full eligibility: env creds + write flag + mocked /me probe
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    if (u.includes("/api/v1/me")) return json({ name: "testuser" });
+    if (u.endsWith("/api/submit")) return json({ json: { errors: [], data: { id: "p1", name: "t3_p1", url: "https://www.reddit.com/r/test/comments/p1/t/" } } });
+    if (u.includes("post_requirements")) return json({});
+    if (u.includes("/about.json")) return json({ data: { submission_type: "any" } });
+    if (u.includes("/api/info.json")) return json({ kind: "Listing", data: { children: [{ kind: "t3", data: { id: "p1", removed_by_category: null } }] } });
+    throw new Error("unexpected " + u);
+  };
+  const shared = await createSharedServices();
+
+  // t3: stdio-hinted server exposes exactly 8 tools with the right annotations
+  const stdio = await createMCPServer(shared, { transport: "stdio" });
+  const tools8 = (await stdio.handlers["tools/list"]()).tools;
+  const names = tools8.map(t => t.name);
+  const rulesDef = tools8.find(t => t.name === "subreddit_rules");
+  const postDef = tools8.find(t => t.name === "create_post");
+  const commentDef = tools8.find(t => t.name === "add_comment");
+  const t3 = tools8.length === 8 && shared.writeStatus.enabled === true && shared.actingUser === "testuser"
+    && names.includes("create_post") && names.includes("add_comment") && names.includes("subreddit_rules")
+    && rulesDef.annotations && rulesDef.annotations.readOnlyHint === true
+    && (postDef.annotations === undefined || postDef.annotations.readOnlyHint !== true)
+    && (commentDef.annotations === undefined || commentDef.annotations.readOnlyHint !== true);
+
+  // t4: the SAME eligible shared services without the stdio hint (the HTTP
+  // per-request path) never see write tools: belt and suspenders
+  const noHint = await createMCPServer(shared);
+  const httpHint = await createMCPServer(shared, { transport: "http" });
+  const t4 = (await noHint.handlers["tools/list"]()).tools.length === 5
+    && (await httpHint.handlers["tools/list"]()).tools.length === 5;
+
+  // t5: CALLING a write tool on a non-stdio server is indistinguishable from
+  // an unknown tool
+  const res5 = await noHint.handlers["tools/call"]({ name: "create_post", arguments: { subreddit: "test", title: "t" } });
+  const t5 = res5.isError === true && res5.content[0].text.includes("Unknown tool");
+
+  // t6: byte budget: the 3 write tool defs must serialize under 4000 chars
+  // (plan section 8: stops description creep from bloating the surface)
+  const writeDefs = tools8.filter(t => ["create_post", "add_comment", "subreddit_rules"].includes(t.name));
+  const bytes = JSON.stringify(writeDefs).length;
+  const t6 = writeDefs.length === 3 && bytes <= 4000;
+
+  // t7: two stdio Server instances share ONE gate: a validate pass armed via
+  // server A lets the identical real call proceed via server B, and the
+  // idempotency record then replays on server A without a second submit
+  const srvA = await createMCPServer(shared, { transport: "stdio" });
+  const srvB = await createMCPServer(shared, { transport: "stdio" });
+  const call = async (srv, name, args) => JSON.parse((await srv.handlers["tools/call"]({ name, arguments: args })).content[0].text);
+  shared.writeTools.verifyDelayMs = 0; // keep the unit test fast
+  const dry = await call(srvA, "create_post", { subreddit: "test", title: "Shared gate", body_markdown: "b", validate_only: true });
+  const real = await call(srvB, "create_post", { subreddit: "test", title: "Shared gate", body_markdown: "b" });
+  const replay = await call(srvA, "create_post", { subreddit: "test", title: "Shared gate", body_markdown: "b" });
+  const t7 = dry.valid === true && real.post_id === "p1" && real.status === "live"
+    && replay.post_id === "p1" && Array.isArray(replay.warnings);
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,bytes}));
+' 2>/dev/null)
+assert "Registration gating: 5 tools unless eligible+stdio, 8 when eligible, byte budget, shared gate" "echo \"\$WRITEREG_RESULT\" | grep -q '^pass$'"
+
+# --------------------------------------------------------------------------
+# 2ae. Write pipeline: preflight, confirmation, verify, invalidation - NEW v1.2.0
+# --------------------------------------------------------------------------
+log_subsection "2ae. Write Pipeline (tools/write.ts, mocked fetch) - NEW v1.2.0"
+
+WRITEPIPE_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
+  import { AuthManager } from "./dist/core/auth.js";
+  import { RateLimiter } from "./dist/core/rate-limiter.js";
+  import { CacheManager } from "./dist/core/cache.js";
+  import { RedditAPI } from "./dist/services/reddit-api.js";
+  import { WriteGate } from "./dist/core/write-gate.js";
+  import { RedditWriteTools } from "./dist/tools/write.js";
+
+  process.env.REDDIT_CLIENT_ID = "testclientid";
+  process.env.REDDIT_CLIENT_SECRET = "testsecret";
+  process.env.REDDIT_USERNAME = "testuser";
+  process.env.REDDIT_PASSWORD = "testpass";
+
+  const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
+  const token = () => json({ access_token: "tok_0123456789", token_type: "bearer", expires_in: 3600, scope: "*" });
+
+  // Per-subreddit fixtures for the mechanical preflight
+  const about = {
+    test:     { submission_type: "any", restrict_posting: false },
+    selfonly: { submission_type: "self" },
+    linkonly: { submission_type: "link" },
+    flairsub: { submission_type: "any" },
+  };
+  const reqs = {
+    test:     { title_blacklisted_strings: ["forbidden"], title_required_strings: [], title_regexes: [] },
+    selfonly: {},
+    linkonly: { domain_blacklist: ["badsite.com"], domain_whitelist: [] },
+    flairsub: { is_flair_required: true },
+    tagsub:   { title_required_strings: ["[Tag]"], title_regexes: ["^\\[Tag\\]"] },
+  };
+  let submitCalls = 0; let commentCalls = 0; let infoMode = "live"; let commentErrors = null;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("access_token")) return token();
+    const subMatch = u.match(/\/r\/([^/]+)\//);
+    const sub = subMatch ? subMatch[1] : "test";
+    if (u.includes("post_requirements")) {
+      const m = u.match(/api\/v1\/([^/]+)\/post_requirements/);
+      return json(reqs[m[1]] ?? {});
+    }
+    if (u.includes("/about.json")) return json({ data: about[sub] ?? { submission_type: "any" } });
+    if (u.includes("link_flair_v2")) return json([{ id: "f1", text: "News", text_editable: false, mod_only: false }]);
+    if (u.endsWith("/api/submit")) { submitCalls++; return json({ json: { errors: [], data: { id: "p1", name: "t3_p1", url: "https://www.reddit.com/r/test/comments/p1/t/" } } }); }
+    if (u.includes("/api/info.json")) {
+      if (infoMode === "fail") return new Response("", { status: 503 });
+      const data = infoMode === "removed" ? { id: "p1", removed_by_category: "automod_filtered" } : { id: "p1", removed_by_category: null };
+      return json({ kind: "Listing", data: { children: infoMode === "gone" ? [] : [{ kind: "t3", data }] } });
+    }
+    if (u.endsWith("/api/comment")) {
+      commentCalls++;
+      if (commentErrors) return json({ json: { errors: commentErrors } });
+      return json({ json: { errors: [], data: { things: [{ data: { id: "t1_c9", permalink: "/r/test/comments/p1/t/c9/" } }] } } });
+    }
+    throw new Error("unexpected " + u);
+  };
+
+  const auth = new AuthManager();
+  await auth.load();
+  const cache = new CacheManager();
+  const api = new RedditAPI({ authManager: auth, rateLimiter: new RateLimiter({ limit: 1000, window: 60000, name: "t" }), cacheManager: cache, timeout: 2000 });
+  let now = 1_700_000_000_000;
+  const gate = new WriteGate({ now: () => now });
+  const tools = new RedditWriteTools({ api, gate, cache, actingUser: "testuser", verifyDelayMs: 0, sleep: async () => {} });
+  const tick = () => { now += 20000; }; // clear the 15s interval floor between writes
+  const fails = async (fn) => { try { await fn(); return ""; } catch (e) { return e.message; } };
+
+  // t1: preflight: kind vs submission_type, both directions
+  const e1a = await fails(() => tools.createPost({ subreddit: "selfonly", title: "t", link_url: "https://x.com/a", validate_only: true }));
+  const e1b = await fails(() => tools.createPost({ subreddit: "linkonly", title: "t", body_markdown: "b", validate_only: true }));
+  const t1 = e1a.includes("only allows self") && e1b.includes("only allows link");
+
+  // t2: flair-required error embeds the valid choices (retry is one call)
+  const e2 = await fails(() => tools.createPost({ subreddit: "flairsub", title: "t", body_markdown: "b", validate_only: true }));
+  const t2 = e2.includes("requires a post flair") && e2.includes("f1") && e2.includes("News");
+
+  // t3: banned title string + required-string/regex checks
+  const e3a = await fails(() => tools.createPost({ subreddit: "test", title: "this is forbidden here", body_markdown: "b", validate_only: true }));
+  const e3b = await fails(() => tools.createPost({ subreddit: "tagsub", title: "no tag present", body_markdown: "b", validate_only: true }));
+  const ok3 = await tools.createPost({ subreddit: "tagsub", title: "[Tag] fine", body_markdown: "b", validate_only: true });
+  const t3 = e3a.includes("bans") && e3b.length > 0 && ok3.valid === true;
+
+  // t4: domain blacklist on link posts
+  const e4 = await fails(() => tools.createPost({ subreddit: "linkonly", title: "t", link_url: "https://sub.badsite.com/x", validate_only: true }));
+  const t4 = e4.includes("badsite.com");
+
+  // t5: validate_only: zero write-path calls, lists what was NOT validated
+  const dry = await tools.createPost({ subreddit: "test", title: "Hello", body_markdown: "b", validate_only: true });
+  const t5 = dry.valid === true && submitCalls === 0
+    && dry.not_checked.some(s => s.includes("subjective")) && dry.checked.length > 0;
+
+  // t6: elicitation declined: clear error, NOTHING posted
+  const e6 = await fails(() => tools.createPost({ subreddit: "test", title: "Declined post", body_markdown: "b" }, { elicit: async () => "declined" }));
+  const t6 = e6.includes("declined") && submitCalls === 0;
+
+  // t7: elicitation confirmed: posts; message echoes sub, acting user, title;
+  // cache invalidation clears subreddit + user listings but keeps rules
+  cache.set(CacheManager.createKey("subreddit", "test", "hot", 25), { stale: true });
+  cache.set(CacheManager.createKey("user-posts", "testuser", "submitted", "new", "all", 10), { stale: true });
+  const rulesKey = CacheManager.createKey("rules", "test", "about");
+  let elicitMsg = "";
+  const res7 = await tools.createPost({ subreddit: "test", title: "Confirmed post", body_markdown: "Secret body" }, { elicit: async (m) => { elicitMsg = m; return "confirmed"; } });
+  const t7 = res7.post_id === "p1" && res7.status === "live" && res7.acting_user === "testuser" && submitCalls === 1
+    && elicitMsg.includes("r/test") && elicitMsg.includes("u/testuser") && elicitMsg.includes("Confirmed post")
+    && cache.get(CacheManager.createKey("subreddit", "test", "hot", 25)) === null
+    && cache.get(CacheManager.createKey("user-posts", "testuser", "submitted", "new", "all", 10)) === null
+    && cache.get(rulesKey) !== null
+    && !JSON.stringify(res7).includes("Secret body"); // response never echoes the body
+
+  // t8: verify-after-submit: removed_by_category -> status "filtered" + warning
+  tick(); infoMode = "removed";
+  const res8 = await tools.createPost({ subreddit: "test", title: "Filtered post", body_markdown: "b" }, { elicit: async () => "confirmed" });
+  const t8 = res8.status === "filtered" && res8.warnings.some(w => w.includes("automod_filtered"));
+
+  // t9: verify read failure -> status "unverified"; missing post -> "filtered"
+  tick(); infoMode = "fail";
+  const res9a = await tools.createPost({ subreddit: "test", title: "Unverified post", body_markdown: "b" }, { elicit: async () => "confirmed" });
+  tick(); infoMode = "gone";
+  const res9b = await tools.createPost({ subreddit: "test", title: "Vanished post", body_markdown: "b" }, { elicit: async () => "confirmed" });
+  infoMode = "live";
+  const t9 = res9a.status === "unverified" && res9b.status === "filtered";
+
+  // t10: comment on a locked thread surfaces the mapped THREAD_LOCKED guidance
+  tick(); commentErrors = [["THREAD_LOCKED", "that thread is locked", "parent"]];
+  const e10 = await fails(() => tools.addComment({ post_id: "p1", text: "hi" }, { elicit: async () => "confirmed" }));
+  commentErrors = null;
+  const t10 = e10.includes("locked");
+
+  // t11: comment success invalidates the parent post cache (sub+post derived
+  // from the returned permalink even for a bare post_id target)
+  tick();
+  cache.set(CacheManager.createKey("post", "test", "p1", "best", 20, 3), { stale: true });
+  const res11 = await tools.addComment({ post_id: "p1", text: "nice take" }, { elicit: async () => "confirmed" });
+  const t11 = res11.comment_id === "c9" && res11.permalink.includes("/r/test/comments/p1/")
+    && cache.get(CacheManager.createKey("post", "test", "p1", "best", 20, 3)) === null;
+
+  // t12: no-elicitation fallback: first real call returns confirmation_required
+  // (nothing posted), the IDENTICAL second call proceeds
+  tick(); const submitsBefore = submitCalls;
+  const first = await tools.createPost({ subreddit: "test", title: "Fallback post", body_markdown: "b" });
+  const afterFirst = submitCalls; // captured BEFORE the confirming second call
+  const second = await tools.createPost({ subreddit: "test", title: "Fallback post", body_markdown: "b" });
+  const t12 = first.status === "confirmation_required" && afterFirst === submitsBefore
+    && second.post_id === "p1" && submitCalls === submitsBefore + 1;
+
+  // t13: rate floor blocks a NEW write attempted immediately after one (the
+  // floor is checked before the confirmation gate ever fires)
+  const e13 = await fails(() => tools.createPost({ subreddit: "test", title: "Too fast", body_markdown: "b" }, { elicit: async () => "confirmed" }));
+  const t13 = e13.includes("interval");
+
+  const all = t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 && t11 && t12 && t13;
+  console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12,t13}));
+' 2>/dev/null)
+assert "Write pipeline: preflight matrix, confirmation gate, verify-after-submit, invalidation" "echo \"\$WRITEPIPE_RESULT\" | grep -q '^pass$'"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

@@ -17,6 +17,7 @@ import { zodToJsonSchema, JsonSchema7Type } from 'zod-to-json-schema';
 import { AuthManager } from './core/auth.js';
 import { CacheManager } from './core/cache.js';
 import { RateLimiter } from './core/rate-limiter.js';
+import { WriteGate } from './core/write-gate.js';
 import { RedditAPI } from './services/reddit-api.js';
 import {
   RedditTools,
@@ -26,6 +27,13 @@ import {
   userAnalysisSchema,
   redditExplainSchema,
 } from './tools/index.js';
+import {
+  RedditWriteTools,
+  WriteConfirmer,
+  createPostSchema,
+  addCommentSchema,
+  subredditRulesSchema,
+} from './tools/write.js';
 
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
@@ -123,11 +131,70 @@ function createValidatedResponse(text: string, isError: boolean = false): ToolRe
 /**
  * Create MCP server with proper protocol implementation
  */
+export interface WriteAccessStatus {
+  enabled: boolean;
+  /** Verified via the /api/v1/me startup probe when enabled */
+  actingUser?: string;
+  /** Names EXACTLY which condition failed when write was requested but denied */
+  reason?: string;
+}
+
 export interface SharedServices {
   cacheManager: CacheManager;
   tools: RedditTools;
   rateLimit: number;
   cacheTTL: number;
+  /** Server-owned write bookkeeping; ONE per process, shared by every Server */
+  writeGate: WriteGate;
+  writeStatus: WriteAccessStatus;
+  /** Present only when writeStatus.enabled */
+  writeTools?: RedditWriteTools;
+  actingUser?: string;
+}
+
+/** Parse boolean env var (supports various truthy formats: true, 1, yes, on) */
+function parseEnvBoolean(envValue: string | undefined): boolean {
+  if (!envValue) return false;
+  return ['true', '1', 'yes', 'on'].includes(envValue.toLowerCase().trim());
+}
+
+/**
+ * Decide whether write tools may exist in this process (plan 3.1, 3.5).
+ * ALL conditions must hold; the first failure is reported by name so the
+ * operator learns why the tools stayed unregistered instead of watching
+ * non-posting tools fail mid-submit:
+ *   1. REDDIT_BUDDY_WRITE is truthy (off by default in the public package)
+ *   2. not HTTP mode: the HTTP transport has no authentication, so write
+ *      tools there would be an unauthenticated posting proxy on /mcp
+ *   3. full user credentials (username + password), sourced from ENV vars:
+ *      --auth file setups never persist the password, so after a restart
+ *      they hold app-only tokens, which cannot post
+ *   4. a live /api/v1/me probe proves the token carries real user context
+ */
+async function evaluateWriteAccess(auth: AuthManager, api: RedditAPI): Promise<WriteAccessStatus> {
+  if (!parseEnvBoolean(process.env.REDDIT_BUDDY_WRITE)) {
+    return { enabled: false, reason: 'REDDIT_BUDDY_WRITE is not set' };
+  }
+  if (parseEnvBoolean(process.env.REDDIT_BUDDY_HTTP)) {
+    return { enabled: false, reason: 'writes are stdio-only: REDDIT_BUDDY_HTTP is set, and the HTTP transport has no authentication' };
+  }
+  if (!auth.hasFullAuth()) {
+    return { enabled: false, reason: 'posting needs full user credentials: set REDDIT_USERNAME and REDDIT_PASSWORD alongside REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET' };
+  }
+  if (!auth.credentialsFromEnv()) {
+    return { enabled: false, reason: 'credentials came from the --auth file, which never stores the password; after a restart those tokens are app-only and cannot post. Provide credentials via environment variables instead' };
+  }
+  try {
+    const me = await api.getMe();
+    const name = typeof me?.name === 'string' && me.name.length > 0 ? me.name : undefined;
+    if (!name) {
+      return { enabled: false, reason: 'the /api/v1/me startup probe returned no user identity (an app-only token cannot post)' };
+    }
+    return { enabled: true, actingUser: name };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { enabled: false, reason: `the /api/v1/me startup probe failed: ${message}` };
+  }
 }
 
 /**
@@ -172,12 +239,52 @@ export async function createSharedServices(): Promise<SharedServices> {
     cacheManager,
   });
 
-  return { cacheManager, tools: new RedditTools(redditAPI), rateLimit, cacheTTL };
+  // Server-owned write state. Created ONCE per process, NEVER per request:
+  // the HTTP path mints a fresh Server per request, and per-request state
+  // would reset the write caps and idempotency records on every call.
+  const writeGate = new WriteGate();
+  const writeStatus = await evaluateWriteAccess(authManager, redditAPI);
+
+  let writeTools: RedditWriteTools | undefined;
+  if (writeStatus.enabled && writeStatus.actingUser) {
+    writeTools = new RedditWriteTools({
+      api: redditAPI,
+      gate: writeGate,
+      cache: cacheManager,
+      actingUser: writeStatus.actingUser,
+    });
+    console.error(`✍️  Write tools ENABLED (stdio only), acting as u/${writeStatus.actingUser}`);
+  } else if (parseEnvBoolean(process.env.REDDIT_BUDDY_WRITE)) {
+    // Write was requested but denied: say exactly which condition failed
+    console.error(`⛔ Write tools requested (REDDIT_BUDDY_WRITE) but NOT enabled: ${writeStatus.reason}`);
+  }
+
+  return {
+    cacheManager,
+    tools: new RedditTools(redditAPI),
+    rateLimit,
+    cacheTTL,
+    writeGate,
+    writeStatus,
+    writeTools,
+    actingUser: writeStatus.actingUser,
+  };
 }
 
-export async function createMCPServer(shared?: SharedServices) {
+export interface CreateMCPServerOptions {
+  /**
+   * Transport hint. ONLY the stdio startup path passes 'stdio'; write tools
+   * never register without it, so the per-request Servers minted by
+   * startHttpServer can never expose them even if REDDIT_BUDDY_WRITE is set
+   * (belt and suspenders on top of the env check in evaluateWriteAccess).
+   */
+  transport?: 'stdio' | 'http';
+}
+
+export async function createMCPServer(shared?: SharedServices, options: CreateMCPServerOptions = {}) {
   const services = shared ?? await createSharedServices();
-  const { cacheManager, tools, rateLimit, cacheTTL } = services;
+  const { cacheManager, tools, rateLimit, cacheTTL, writeTools } = services;
+  const writeEnabled = options.transport === 'stdio' && services.writeStatus.enabled && writeTools !== undefined;
 
   // Create MCP server
   const server = new Server(
@@ -246,7 +353,69 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
       annotations: { readOnlyHint: true }
     }
   ];
-  
+
+  // Write tools (v1.2.0): registered ONLY on the stdio path with write access
+  // proven at startup. Read-only installs see exactly the 5 tools above.
+  // Descriptions stay tight: the 3 definitions together are held under a
+  // 4000-char byte budget by a unit test (plan section 8).
+  if (writeEnabled) {
+    toolDefinitions.push(
+      {
+        name: 'create_post',
+        description: 'Submit a text or link post to one subreddit. Mechanical rule checks run first; validate_only:true is a dry run that posts nothing. Every real submit needs a user confirmation.',
+        inputSchema: zodSchemaToMCPInputSchema(createPostSchema, 'create_post'),
+      },
+      {
+        name: 'add_comment',
+        description: 'Comment on a post or reply to a comment. Give exactly one target: post_id, comment_id, or url. Every real submit needs a user confirmation.',
+        inputSchema: zodSchemaToMCPInputSchema(addCommentSchema, 'add_comment'),
+      },
+      {
+        name: 'subreddit_rules',
+        description: 'Fetch a subreddit\'s rules, posting requirements, capability flags, and flair choices in one cached call. Check before drafting a post.',
+        inputSchema: zodSchemaToMCPInputSchema(subredditRulesSchema, 'subreddit_rules'),
+        annotations: { readOnlyHint: true }
+      }
+    );
+  }
+
+  /**
+   * Build the per-call confirmer for the server-owned confirmation gate.
+   * When the client declared the form-elicitation capability, the server asks
+   * the human directly before every real submit; a decline or cancel aborts.
+   * Without the capability, elicit stays undefined and the tools fall back to
+   * the enforced dry-run two-call confirm tracked in the WriteGate.
+   * Evaluated per call: capabilities only exist after initialize.
+   */
+  const makeConfirmer = (): WriteConfirmer => {
+    if (!server.getClientCapabilities()?.elicitation?.form) {
+      return {};
+    }
+    return {
+      elicit: async (message: string) => {
+        const result = await server.elicitInput({
+          message,
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              confirm: {
+                type: 'boolean',
+                title: 'Submit to Reddit?',
+                description: 'true submits exactly what is shown above; false aborts.',
+              },
+            },
+            required: ['confirm'],
+          },
+        });
+        // Only an explicit accept with confirm:true proceeds; decline,
+        // cancel, and accept-without-confirm all abort.
+        return result.action === 'accept' && result.content?.confirm === true
+          ? 'confirmed'
+          : 'declined';
+      },
+    };
+  };
+
   // Store handlers for HTTP access
   const handlers = {
     'tools/list': async () => ({
@@ -285,6 +454,24 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
             redditExplainSchema.parse(args)
           );
           break;
+        case 'create_post':
+        case 'add_comment':
+        case 'subreddit_rules': {
+          // Unregistered tools must be indistinguishable from unknown ones:
+          // an HTTP-mode or read-only caller probing a write tool by name
+          // gets the same error as for any tool that does not exist.
+          if (!writeEnabled || !writeTools) {
+            throw new Error(`Unknown tool: ${name}`);
+          }
+          if (name === 'create_post') {
+            result = await writeTools.createPost(createPostSchema.parse(args), makeConfirmer());
+          } else if (name === 'add_comment') {
+            result = await writeTools.addComment(addCommentSchema.parse(args), makeConfirmer());
+          } else {
+            result = await writeTools.subredditRules(subredditRulesSchema.parse(args));
+          }
+          break;
+        }
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -310,7 +497,9 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
  * Start server with stdio transport (for Claude Desktop)
  */
 export async function startStdioServer() {
-  const { server, cacheManager } = await createMCPServer();
+  // The stdio path is the ONLY caller allowed to pass the 'stdio' transport
+  // hint, which is what permits write-tool registration (when eligible).
+  const { server, cacheManager } = await createMCPServer(undefined, { transport: 'stdio' });
   
   const transport = new StdioServerTransport();
   await server.connect(transport);

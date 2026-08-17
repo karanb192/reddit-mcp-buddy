@@ -25,6 +25,9 @@ export interface RedditPost {
   ups: number;
   downs: number;
   upvote_ratio?: number;
+  // Set when the post was removed/held (e.g. "automod_filtered", "moderator",
+  // "reddit"); verify-after-submit reads it to detect silent auto-removal.
+  removed_by_category?: string | null;
 }
 
 export interface RedditComment {
