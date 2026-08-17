@@ -417,6 +417,24 @@ export class AuthManager {
   }
 
   /**
+   * True when the loaded credentials came from environment variables.
+   * Write registration requires env-sourced credentials: --auth file setups
+   * never persist the password, so after a restart they degrade to app-only
+   * tokens, which cannot post.
+   */
+  credentialsFromEnv(): boolean {
+    return this.configFromEnv;
+  }
+
+  /**
+   * Username of the acting account, when user credentials are configured.
+   * Write tools echo this so the posting identity is always explicit.
+   */
+  getUsername(): string | undefined {
+    return this.config?.username;
+  }
+
+  /**
    * Get auth mode string for display
    */
   getAuthMode(): string {

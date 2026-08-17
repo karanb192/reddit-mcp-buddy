@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.karanb192/reddit-mcp-buddy",
-  "version": "1.1.14",
-  "description": "Reddit browser for AI assistants. Browse without API keys; add credentials for search and analysis.",
+  "version": "1.2.0",
+  "description": "Reddit for AI assistants: browse, search, analyze; opt-in posting with server-side safety rails.",
   "author": {
     "name": "Karan Bansal",
     "email": "karanb192@gmail.com",
@@ -20,7 +20,7 @@
     {
       "registryType": "npm",
       "identifier": "reddit-mcp-buddy",
-      "version": "1.1.14",
+      "version": "1.2.0",
       "transport": {
         "type": "stdio"
       }
@@ -38,7 +38,10 @@
     "search-posts",
     "get-comments",
     "user-analysis",
-    "reddit-terms"
+    "reddit-terms",
+    "create-posts",
+    "add-comments",
+    "subreddit-rules"
   ],
   "tools": [
     {
@@ -60,6 +63,18 @@
     {
       "name": "reddit_explain",
       "description": "Get explanations of Reddit terminology, slang, and culture (karma, cake day, AMA, ELI5, etc.) with definitions and usage examples."
+    },
+    {
+      "name": "create_post",
+      "description": "Submit a text or link post to one subreddit, with mechanical rule preflight, a validate_only dry run, and a user confirmation before every real submit (opt-in via REDDIT_BUDDY_WRITE, stdio only)."
+    },
+    {
+      "name": "add_comment",
+      "description": "Comment on a post or reply to a specific comment, behind the same opt-in, credential, and confirmation gates as create_post."
+    },
+    {
+      "name": "subreddit_rules",
+      "description": "Fetch a subreddit's rules, posting requirements, capability flags, and flair choices in one cached read-only call."
     }
   ]
 }

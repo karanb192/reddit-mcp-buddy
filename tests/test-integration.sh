@@ -867,6 +867,109 @@ assert_contains "Stdio: returns tool list" "$STDIO_RESULT" '"browse_subreddit"'
 assert_contains "Stdio: returns all 5 tools" "$STDIO_RESULT" '"reddit_explain"'
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 7: LIVE WRITE TESTS (opt-in, never in PR CI)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# The ONLY tests that write to Reddit. They post to a private sandbox
+# subreddit owned by the test account, verify via fresh reads, comment on the
+# created post, then delete everything via /api/del; one u_ profile-sub post
+# exercises that code path too. Three gates must ALL hold or the section
+# self-skips loudly, so the PR workflow (which never sets RUN_WRITE_TESTS)
+# and dev machines with credentials stay write-free by default:
+#   1. RUN_WRITE_TESTS=1
+#   2. full user credentials in env (REDDIT_USERNAME + REDDIT_PASSWORD too)
+#   3. REDDIT_TEST_SUBREDDIT naming the private sandbox subreddit
+
+log_section "SECTION 7: Live Write Tests (opt-in)"
+
+log_subsection "7a. Sandbox post / comment / delete round-trip"
+
+if [ "${RUN_WRITE_TESTS:-}" != "1" ]; then
+  skip_test "live write round-trip (post, verify, comment, delete)" "RUN_WRITE_TESTS=1 not set (the default: CI and normal dev runs never write)"
+elif [ "$HAS_CREDS" != "1" ] || [ -z "${REDDIT_USERNAME:-}" ] || [ -z "${REDDIT_PASSWORD:-}" ]; then
+  skip_test "live write round-trip (post, verify, comment, delete)" "full user credentials (REDDIT_USERNAME + REDDIT_PASSWORD) are required to post"
+elif [ -z "${REDDIT_TEST_SUBREDDIT:-}" ]; then
+  skip_test "live write round-trip (post, verify, comment, delete)" "REDDIT_TEST_SUBREDDIT (your private sandbox subreddit) is not set"
+else
+  echo -e "  ${YELLOW}⚠ RUN_WRITE_TESTS=1: writing to the private sandbox r/${REDDIT_TEST_SUBREDDIT} as u/${REDDIT_USERNAME}${NC}"
+
+  # The driver exercises the real write stack (createSharedServices proves the
+  # startup gating incl. the /me probe) and prints LIVE_* markers the asserts
+  # below match on. Every created thing is deleted before the driver exits.
+  # The 16 s sleeps respect the WriteGate's non-bypassable 15 s interval.
+  WRITE_LIVE_OUTPUT=$(REDDIT_BUDDY_WRITE=true node --input-type=module -e '
+    import { createSharedServices } from "./dist/mcp-server.js";
+
+    const fail = (msg, e) => { console.log("LIVE_FAIL " + msg + (e ? ": " + (e && e.message ? e.message : e) : "")); process.exit(1); };
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    const shared = await createSharedServices();
+    if (!shared.writeStatus.enabled || !shared.writeTools) fail("write access not enabled: " + shared.writeStatus.reason);
+    console.log("LIVE_WRITE_READY acting_user=" + shared.actingUser);
+
+    const sub = process.env.REDDIT_TEST_SUBREDDIT;
+    const confirm = { elicit: async () => "confirmed" };
+    const tools = shared.writeTools;
+    const api = tools["api"];
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const del = (fullname) => api["postForm"]("/api/del", new URLSearchParams({ api_type: "json", id: fullname }));
+
+    // Rules aggregate on the sandbox (also warms the preflight caches)
+    const rules = await tools.subredditRules({ subreddit: sub }).catch(e => fail("subreddit_rules", e));
+    if (!rules.untrusted_content_note) fail("rules response missing the reference-only fencing note");
+    console.log("LIVE_RULES_OK");
+
+    // 1. Self post to the sandbox
+    const post = await tools.createPost({
+      subreddit: sub,
+      title: "reddit-mcp-buddy live test " + stamp,
+      body_markdown: "Automated v1.2.0 integration test post. It deletes itself in a few seconds.",
+    }, confirm).catch(e => fail("create_post", e));
+    if (!post || !post.post_id) fail("create_post returned no post_id: " + JSON.stringify(post));
+    console.log("LIVE_POST_OK id=" + post.post_id + " status=" + post.status);
+
+    // 2. Verify with a fresh, cache-bypassing read
+    const fresh = await api.getPostInfoFresh(post.post_id).catch(e => fail("verify read", e));
+    if (!fresh || !(fresh.title || "").includes(stamp)) fail("created post not visible via /api/info");
+    console.log("LIVE_POST_VISIBLE");
+
+    // 3. Comment on the created post (respecting the 15 s write interval)
+    await sleep(16000);
+    const comment = await tools.addComment({ post_id: post.post_id, text: "Automated test comment (self-deleting)." }, confirm)
+      .catch(e => fail("add_comment", e));
+    if (!comment || !comment.comment_id) fail("add_comment returned no comment_id");
+    console.log("LIVE_COMMENT_OK id=" + comment.comment_id);
+
+    // 4. Delete the comment, then the post
+    await del("t1_" + comment.comment_id).catch(e => fail("delete comment", e));
+    await del("t3_" + post.post_id).catch(e => fail("delete post", e));
+    console.log("LIVE_CLEANUP_OK");
+
+    // 5. One u_ profile-sub post covers that code path, deleted immediately
+    await sleep(16000);
+    const profile = await tools.createPost({
+      subreddit: "u_" + process.env.REDDIT_USERNAME,
+      title: "reddit-mcp-buddy profile live test " + stamp,
+      body_markdown: "Automated profile-sub test post. It deletes itself immediately.",
+    }, confirm).catch(e => fail("profile create_post", e));
+    if (!profile || !profile.post_id) fail("profile create_post returned no post_id");
+    await del("t3_" + profile.post_id).catch(e => fail("delete profile post", e));
+    console.log("LIVE_PROFILE_OK id=" + profile.post_id);
+  ' 2>&1)
+  echo "$WRITE_LIVE_OUTPUT" | sed 's/^/    /'
+  API_CALLS=$((API_CALLS + 12))
+
+  assert_contains "Live: write access proven at startup (env creds + /me probe)" "$WRITE_LIVE_OUTPUT" "LIVE_WRITE_READY"
+  assert_contains "Live: subreddit_rules aggregates the sandbox sub" "$WRITE_LIVE_OUTPUT" "LIVE_RULES_OK"
+  assert_contains "Live: self post created in the sandbox" "$WRITE_LIVE_OUTPUT" "LIVE_POST_OK"
+  assert_contains "Live: created post visible via a fresh read" "$WRITE_LIVE_OUTPUT" "LIVE_POST_VISIBLE"
+  assert_contains "Live: comment added to the created post" "$WRITE_LIVE_OUTPUT" "LIVE_COMMENT_OK"
+  assert_contains "Live: comment and post deleted via /api/del" "$WRITE_LIVE_OUTPUT" "LIVE_CLEANUP_OK"
+  assert_contains "Live: u_ profile-sub post created and deleted" "$WRITE_LIVE_OUTPUT" "LIVE_PROFILE_OK"
+  assert_not_contains "Live: no step reported failure" "$WRITE_LIVE_OUTPUT" "LIVE_FAIL"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
