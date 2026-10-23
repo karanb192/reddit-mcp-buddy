@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY . .
 RUN npm run build
 
 # Runtime stage - Using slim instead of alpine for better SSL support
-FROM node:20-slim
+FROM node:22-slim
 
 # Install dumb-init for proper signal handling and update certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
