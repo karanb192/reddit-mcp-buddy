@@ -833,9 +833,9 @@ BACKOFF_TEST=$(node --input-type=module -e "
   const mockRespNull = { headers: { get: () => null } };
   const t7 = api['getRetryAfterDelay'](mockRespNull) === null;
 
-  // Test getRetryAfterDelay capped at MAX_BACKOFF_MS (30000)
+  // Preserve the full upstream wait so callers can report it without retrying early
   const mockRespHuge = { headers: { get: (h) => h === 'retry-after' ? '120' : null } };
-  const t8 = api['getRetryAfterDelay'](mockRespHuge) === 30000;
+  const t8 = api['getRetryAfterDelay'](mockRespHuge) === 120000;
 
   // Test stale in-flight cleanup (TTL is 5 min)
   api['inFlightRequests'].set('/stale', Promise.resolve());
@@ -1343,6 +1343,8 @@ assert "Tool definitions: 5 tools, readOnlyHint under annotations, schemas intac
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+assert "API errors identify missing credentials and return long retry waits immediately" "node tests/api-access-unit.mjs"
+
 # RESULTS
 # ═══════════════════════════════════════════════════════════════════════════════
 

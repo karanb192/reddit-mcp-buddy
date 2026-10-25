@@ -43,6 +43,8 @@ export class RedditAPI {
   private readonly IN_FLIGHT_REQUEST_TTL_MS = 5 * 60 * 1000;
   // Exponential backoff configuration
   private readonly MAX_BACKOFF_MS = 30000; // 30 second max backoff
+  // Surface long upstream waits instead of consuming the client's request timeout.
+  private readonly MAX_AUTO_RETRY_WAIT_MS = 5000;
   private readonly INITIAL_BACKOFF_MS = 100;
   private readonly BACKOFF_MULTIPLIER = 2;
   // Set when the anonymous .json API is proven blocked for this IP: it
@@ -187,7 +189,7 @@ export class RedditAPI {
         throw new Error(`Cannot access r/${subreddit} - it may be private, quarantined, or NSFW (Reddit's logged-out feed refuses NSFW subreddits)`);
       }
       if (status === 429) {
-        throw new Error(`Reddit rate-limited the RSS feed for r/${subreddit} (HTTP 429) - anonymous access has a small per-IP quota; wait a minute and try again`);
+        throw this.httpError(`Reddit rate-limited the RSS feed for r/${subreddit}. ${error instanceof Error ? error.message : 'Wait before retrying.'}`, 429);
       }
       throw error;
     }
@@ -329,17 +331,16 @@ export class RedditAPI {
       clearTimeout(timeoutId);
       this.rateLimiter.recordRequest();
 
-      // Reddit throttles the logged-out feed per-IP in short windows
-      // (~25-60s, advertised via Retry-After / x-ratelimit-reset). Retry
-      // transient failures like the JSON path does, honoring the server's
-      // requested wait.
-      if ((response.status === 429 || response.status === 503) && retries > 0) {
+      if (response.status === 429 || response.status === 503) {
         const waitMs =
           this.getRetryAfterDelay(response) ??
           this.getRateLimitResetDelay(response) ??
           this.calculateBackoff(retries);
-        await new Promise(resolve => setTimeout(resolve, waitMs));
-        return this.getRSS(endpoint, retries - 1);
+        if (retries > 0 && waitMs <= this.MAX_AUTO_RETRY_WAIT_MS) {
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+          return this.getRSS(endpoint, retries - 1);
+        }
+        throw this.retryWaitError(response.status, waitMs);
       }
 
       if (!response.ok) {
@@ -609,6 +610,15 @@ export class RedditAPI {
    * distinguish failure classes (e.g. the anonymous 403 IP-block) without
    * parsing message text.
    */
+  private anonymousAccessError(): Error {
+    return this.httpError('Reddit rejected anonymous API access (HTTP 403). This tool needs approved Reddit API credentials; see README Authentication. browse_subreddit may still work via RSS.', 403);
+  }
+
+  private retryWaitError(status: number, waitMs: number): Error {
+    const reason = status === 429 ? 'Reddit rate limit' : 'Reddit is temporarily unavailable';
+    return this.httpError(`${reason} (HTTP ${status}). Retry in ${Math.ceil(waitMs / 1000)}s.`, status);
+  }
+
   private httpError(message: string, status: number): Error {
     const err: Error & { status?: number } = new Error(message);
     err.status = status;
@@ -643,17 +653,16 @@ export class RedditAPI {
     if (!retryAfter) return null;
 
     // Retry-After can be seconds or HTTP date
-    const seconds = parseInt(retryAfter, 10);
-    if (!isNaN(seconds)) {
-      // It's seconds
-      return Math.min(seconds * 1000, this.MAX_BACKOFF_MS);
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) {
+      return seconds >= 0 ? seconds * 1000 : null;
     }
 
     // Try parsing as HTTP date
     try {
       const retryDate = new Date(retryAfter);
       const delay = retryDate.getTime() - Date.now();
-      return Math.max(0, Math.min(delay, this.MAX_BACKOFF_MS));
+      return Number.isFinite(delay) ? Math.max(0, delay) : null;
     } catch {
       return null;
     }
@@ -668,9 +677,9 @@ export class RedditAPI {
     const reset = response.headers.get('x-ratelimit-reset');
     if (!reset) return null;
     const seconds = parseFloat(reset);
-    if (isNaN(seconds) || seconds < 0) return null;
+    if (!Number.isFinite(seconds) || seconds < 0) return null;
     // +1s cushion so the retry lands inside the next window
-    return Math.min((seconds + 1) * 1000, this.MAX_BACKOFF_MS);
+    return (seconds + 1) * 1000;
   }
 
   /**
@@ -721,6 +730,9 @@ export class RedditAPI {
    * Private: Implementation of GET request with retry logic
    */
   private async getImpl<T>(endpoint: string, retries: number = 2): Promise<T> {
+    if (!this.auth.isAuthenticated() && this.anonJsonBlockedUntil > Date.now()) {
+      throw this.anonymousAccessError();
+    }
     // Check rate limit
     if (!this.rateLimiter.canMakeRequest()) {
       const isAuth = this.auth.isAuthenticated();
@@ -764,14 +776,15 @@ export class RedditAPI {
 
       // Handle errors
       if (!response.ok) {
-        // Retry on transient errors (503, 429)
-        if ((response.status === 503 || response.status === 429) && retries > 0) {
-          // Service unavailable or too many requests - exponential backoff with jitter
-          // Check for Retry-After header first (respects server's backoff request)
-          const retryAfterDelay = this.getRetryAfterDelay(response);
-          const backoffMs = retryAfterDelay ?? this.calculateBackoff(retries);
-          await new Promise(resolve => setTimeout(resolve, backoffMs));
-          return this.getImpl<T>(endpoint, retries - 1);
+        if (response.status === 503 || response.status === 429) {
+          const waitMs = this.getRetryAfterDelay(response)
+            ?? this.getRateLimitResetDelay(response)
+            ?? this.calculateBackoff(retries);
+          if (retries > 0 && waitMs <= this.MAX_AUTO_RETRY_WAIT_MS) {
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+            return this.getImpl<T>(endpoint, retries - 1);
+          }
+          throw this.retryWaitError(response.status, waitMs);
         }
 
         if (response.status === 404) {
@@ -781,6 +794,9 @@ export class RedditAPI {
           throw this.httpError(`Not found - r/${subredditName} does not exist or is inaccessible`, 404);
         }
         if (response.status === 403) {
+          if (!isAuthenticated) {
+            throw this.anonymousAccessError();
+          }
           // For 403, try to determine if it's a non-existent subreddit or private
           const subredditMatch = endpoint.match(/\/r\/([^\/]+)/);
           const subredditName = subredditMatch ? subredditMatch[1] : null;
@@ -790,12 +806,6 @@ export class RedditAPI {
             throw this.httpError(`Cannot access r/${subredditName} - it may be private, quarantined, or doesn't exist. Try a public subreddit like 'programming', 'technology', or 'news'`, 403);
           }
           throw this.httpError('Access forbidden - the requested content may be private or restricted', 403);
-        }
-        if (response.status === 429) {
-          throw this.httpError('Rate limited by Reddit - please wait before trying again', 429);
-        }
-        if (response.status === 503) {
-          throw this.httpError('Reddit is temporarily unavailable - please try again later', 503);
         }
 
         let errorText = '';
