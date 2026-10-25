@@ -110,6 +110,10 @@ node scripts/rate-limit-tester.cjs auth 120        # Test 120 requests in authen
 
 ### Creating a Reddit App
 
+First obtain explicit approval for your app and use case under Reddit's [Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy). Reddit directs developers to [Devvit](https://developers.reddit.com/) first. If it does not support your use case, use [Reddit's API access request form](https://support.reddithelp.com/hc/en-us/requests/new?tf_42139884615700=api_request_type_developer_clone&ticket_form_id=14868593862164).
+
+After approval, use your existing app or follow Reddit's instructions to register one. The steps below describe the app form, not a way to bypass approval.
+
 1. Go to https://www.reddit.com/prefs/apps
 2. Click "Create App" or "Create Another App"
 3. Fill in the form:
