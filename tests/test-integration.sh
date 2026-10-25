@@ -872,8 +872,8 @@ assert_contains "Stdio: returns all 5 tools" "$STDIO_RESULT" '"reddit_explain"'
 #
 # The ONLY tests that write to Reddit. They post to a private sandbox
 # subreddit owned by the test account, verify via fresh reads, comment on the
-# created post, then delete everything via /api/del; one u_ profile-sub post
-# exercises that code path too. Three gates must ALL hold or the section
+# created post, then attempt cleanup in finally and verify deletion. The sandbox
+# must be private and moderated by the acting user. No profile posts are made. Three gates must ALL hold or the section
 # self-skips loudly, so the PR workflow (which never sets RUN_WRITE_TESTS)
 # and dev machines with credentials stay write-free by default:
 #   1. RUN_WRITE_TESTS=1
@@ -895,66 +895,104 @@ else
 
   # The driver exercises the real write stack (createSharedServices proves the
   # startup gating incl. the /me probe) and prints LIVE_* markers the asserts
-  # below match on. Every created thing is deleted before the driver exits.
+  # below match on. Cleanup failures leave explicit IDs for manual inspection.
   # The 16 s sleeps respect the WriteGate's non-bypassable 15 s interval.
   WRITE_LIVE_OUTPUT=$(REDDIT_BUDDY_WRITE=true node --input-type=module -e '
     import { createSharedServices } from "./dist/mcp-server.js";
+    import { randomUUID } from "node:crypto";
 
-    const fail = (msg, e) => { console.log("LIVE_FAIL " + msg + (e ? ": " + (e && e.message ? e.message : e) : "")); process.exit(1); };
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
     const shared = await createSharedServices();
-    if (!shared.writeStatus.enabled || !shared.writeTools) fail("write access not enabled: " + shared.writeStatus.reason);
-    console.log("LIVE_WRITE_READY acting_user=" + shared.actingUser);
-
     const sub = process.env.REDDIT_TEST_SUBREDDIT;
-    const confirm = { elicit: async () => "confirmed" };
-    const tools = shared.writeTools;
-    const api = tools["api"];
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const del = (fullname) => api["postForm"]("/api/del", new URLSearchParams({ api_type: "json", id: fullname }));
+    const marker = "reddit-mcp-buddy test " + randomUUID();
+    const commentText = "Integration test comment: " + marker;
+    const created = new Set();
+    const attempted = { submitted: false, comments: false };
+    let api;
+    let postId;
+    let commentId;
+    let cleanupFailed = false;
 
-    // Rules aggregate on the sandbox (also warms the preflight caches)
-    const rules = await tools.subredditRules({ subreddit: sub }).catch(e => fail("subreddit_rules", e));
-    if (!rules.untrusted_content_note) fail("rules response missing the reference-only fencing note");
-    console.log("LIVE_RULES_OK");
+    try {
+      if (!shared.writeStatus.enabled || !shared.writeTools) throw new Error("write access not enabled");
+      console.log("LIVE_WRITE_READY acting_user=" + shared.actingUser);
+      const tools = shared.writeTools;
+      api = tools["api"];
+      const about = await api.getSubredditAboutFull(sub);
+      if (about?.subreddit_type !== "private" || about?.user_is_moderator !== true) {
+        throw new Error("sandbox must be private and the acting user must be a moderator");
+      }
+      const rules = await tools.subredditRules({ subreddit: sub });
+      if (!rules.untrusted_content_note) throw new Error("rules response missing reference-only note");
+      console.log("LIVE_RULES_OK");
+      const confirm = { elicit: async () => "confirmed" };
 
-    // 1. Self post to the sandbox
-    const post = await tools.createPost({
-      subreddit: sub,
-      title: "reddit-mcp-buddy live test " + stamp,
-      body_markdown: "Automated v1.2.0 integration test post. It deletes itself in a few seconds.",
-    }, confirm).catch(e => fail("create_post", e));
-    if (!post || !post.post_id) fail("create_post returned no post_id: " + JSON.stringify(post));
-    console.log("LIVE_POST_OK id=" + post.post_id + " status=" + post.status);
+      attempted.submitted = true;
+      const post = await tools.createPost({
+        subreddit: sub, title: marker,
+        body_markdown: "Private integration test. Cleanup is attempted even if a later step fails.",
+      }, confirm);
+      if (!post?.post_id) throw new Error("create_post returned no post_id");
+      postId = post.post_id;
+      created.add("t3_" + postId);
+      console.log("LIVE_POST_OK id=" + postId + " status=" + post.status);
+      const fresh = await api.getPostInfoFresh(postId);
+      if (fresh?.title !== marker) throw new Error("created post not visible");
+      console.log("LIVE_POST_VISIBLE");
 
-    // 2. Verify with a fresh, cache-bypassing read
-    const fresh = await api.getPostInfoFresh(post.post_id).catch(e => fail("verify read", e));
-    if (!fresh || !(fresh.title || "").includes(stamp)) fail("created post not visible via /api/info");
-    console.log("LIVE_POST_VISIBLE");
+      await sleep(16000);
+      attempted.comments = true;
+      const comment = await tools.addComment({ post_id: postId, text: commentText }, confirm);
+      if (!comment?.comment_id) throw new Error("add_comment returned no comment_id");
+      commentId = comment.comment_id;
+      created.add("t1_" + commentId);
+      console.log("LIVE_COMMENT_OK id=" + commentId);
+    } catch (error) {
+      console.log("LIVE_FAIL " + error.message);
+      process.exitCode = 1;
+    } finally {
+      if (api) {
+        for (const type of ["submitted", "comments"]) {
+          if (!attempted[type] || (type === "submitted" ? postId : commentId)) continue;
+          try {
+            const listing = await api["get"]("/user/" + encodeURIComponent(shared.actingUser) + "/" + type + ".json?sort=new&limit=100");
+            let found = false;
+            for (const child of listing?.data?.children ?? []) {
+              const item = child.data;
+              const matches = type === "submitted"
+                ? item.title === marker
+                : item.body === commentText && item.link_id === "t3_" + postId;
+              if (matches && item.subreddit?.toLowerCase() === sub.toLowerCase()) {
+                created.add((type === "submitted" ? "t3_" : "t1_") + item.id);
+                found = true;
+              }
+            }
+            if (!found) throw new Error("write outcome unknown; manually check marker " + marker);
+          } catch (error) {
+            console.log("LIVE_FAIL recovery: " + error.message);
+            cleanupFailed = true;
+          }
+        }
 
-    // 3. Comment on the created post (respecting the 15 s write interval)
-    await sleep(16000);
-    const comment = await tools.addComment({ post_id: post.post_id, text: "Automated test comment (self-deleting)." }, confirm)
-      .catch(e => fail("add_comment", e));
-    if (!comment || !comment.comment_id) fail("add_comment returned no comment_id");
-    console.log("LIVE_COMMENT_OK id=" + comment.comment_id);
-
-    // 4. Delete the comment, then the post
-    await del("t1_" + comment.comment_id).catch(e => fail("delete comment", e));
-    await del("t3_" + post.post_id).catch(e => fail("delete post", e));
-    console.log("LIVE_CLEANUP_OK");
-
-    // 5. One u_ profile-sub post covers that code path, deleted immediately
-    await sleep(16000);
-    const profile = await tools.createPost({
-      subreddit: "u_" + process.env.REDDIT_USERNAME,
-      title: "reddit-mcp-buddy profile live test " + stamp,
-      body_markdown: "Automated profile-sub test post. It deletes itself immediately.",
-    }, confirm).catch(e => fail("profile create_post", e));
-    if (!profile || !profile.post_id) fail("profile create_post returned no post_id");
-    await del("t3_" + profile.post_id).catch(e => fail("delete profile post", e));
-    console.log("LIVE_PROFILE_OK id=" + profile.post_id);
+        for (const id of [...created].sort((a, b) => a.localeCompare(b))) {
+          try {
+            await api["postForm"]("/api/del", new URLSearchParams({ api_type: "json", id }));
+            const info = await api["get"]("/api/info.json?id=" + encodeURIComponent(id));
+            const item = info?.data?.children?.[0]?.data;
+            if (item && item.author !== "[deleted]" && item.body !== "[deleted]" && item.removed_by_category !== "deleted") {
+              throw new Error("deletion not yet verified for " + id);
+            }
+            console.log("LIVE_DELETED " + id);
+          } catch (error) {
+            console.log("LIVE_FAIL cleanup " + id + ": " + error.message);
+            cleanupFailed = true;
+          }
+        }
+      }
+      shared.cacheManager.destroy();
+      if (cleanupFailed) process.exitCode = 1;
+      if (!cleanupFailed && postId && commentId) console.log("LIVE_CLEANUP_OK");
+    }
   ' 2>&1)
   echo "$WRITE_LIVE_OUTPUT" | sed 's/^/    /'
   API_CALLS=$((API_CALLS + 12))
@@ -965,7 +1003,6 @@ else
   assert_contains "Live: created post visible via a fresh read" "$WRITE_LIVE_OUTPUT" "LIVE_POST_VISIBLE"
   assert_contains "Live: comment added to the created post" "$WRITE_LIVE_OUTPUT" "LIVE_COMMENT_OK"
   assert_contains "Live: comment and post deleted via /api/del" "$WRITE_LIVE_OUTPUT" "LIVE_CLEANUP_OK"
-  assert_contains "Live: u_ profile-sub post created and deleted" "$WRITE_LIVE_OUTPUT" "LIVE_PROFILE_OK"
   assert_not_contains "Live: no step reported failure" "$WRITE_LIVE_OUTPUT" "LIVE_FAIL"
 fi
 
