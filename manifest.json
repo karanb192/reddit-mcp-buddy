@@ -28,6 +28,7 @@
         "REDDIT_CLIENT_SECRET": "${user_config.reddit_client_secret}",
         "REDDIT_USERNAME": "${user_config.reddit_username}",
         "REDDIT_PASSWORD": "${user_config.reddit_password}",
+        "REDDIT_REFRESH_TOKEN": "${user_config.reddit_refresh_token}",
         "REDDIT_BUDDY_WRITE": "${user_config.enable_write_tools}"
       }
     }
@@ -96,14 +97,21 @@
     "reddit_username": {
       "type": "string",
       "title": "Reddit Username",
-      "description": "Your Reddit username (optional; all four credentials select a local cap of 100 req/min, not extra Reddit quota)",
+      "description": "Your Reddit username (required with password for script-app authentication)",
       "required": false,
       "sensitive": false
     },
     "reddit_password": {
       "type": "string",
       "title": "Reddit Password",
-      "description": "Your Reddit password (required with username for password authentication; Reddit applies its own limits)",
+      "description": "Your Reddit password for script-app authentication. Leave empty when using an OAuth refresh token.",
+      "required": false,
+      "sensitive": true
+    },
+    "reddit_refresh_token": {
+      "type": "string",
+      "title": "Reddit OAuth Refresh Token",
+      "description": "Refresh token from your approved app's OAuth consent flow. Leave the password field empty. Reddit applies its own limits.",
       "required": false,
       "sensitive": true
     },

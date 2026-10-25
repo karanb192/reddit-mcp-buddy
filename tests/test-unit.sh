@@ -836,9 +836,9 @@ BACKOFF_TEST=$(node --input-type=module -e "
   const mockRespNull = { headers: { get: () => null } };
   const t7 = api['getRetryAfterDelay'](mockRespNull) === null;
 
-  // Test getRetryAfterDelay capped at MAX_BACKOFF_MS (30000)
+  // Preserve the full upstream wait so callers can report it without retrying early
   const mockRespHuge = { headers: { get: (h) => h === 'retry-after' ? '120' : null } };
-  const t8 = api['getRetryAfterDelay'](mockRespHuge) === 30000;
+  const t8 = api['getRetryAfterDelay'](mockRespHuge) === 120000;
 
   // Test stale in-flight cleanup (TTL is 5 min)
   api['inFlightRequests'].set('/stale', Promise.resolve());
@@ -2376,6 +2376,9 @@ if ! echo "$ELICIT_RESULT" | grep -q '^pass$'; then
   fi
 fi
 assert "Elicitation gate: decline/cancel/soft-accept send nothing, confirmed accept posts once, instructions gated" "echo \"\$ELICIT_RESULT\" | grep -q '^pass$'"
+
+assert "API retries return long waits immediately and preserve transient recovery" "node tests/api-access-unit.mjs"
+assert "OAuth refresh auth: grants, scopes, credential isolation, and redacted failures" "node tests/auth-refresh-unit.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

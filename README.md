@@ -169,14 +169,14 @@ Without credentials, `browse_subreddit` can use public RSS feeds and `reddit_exp
 1. **Obtain Reddit API approval** for your app and use case using the links above.
 2. **Open** https://www.reddit.com/prefs/apps and select your approved app. If Reddit instructs you to create an app, follow its instructions.
 3. **Fill out the form:**
-   - **Name**: Any name (e.g., "reddit-mcp-buddy")
-   - **App type**: Use **"script"** if you need the password-grant mode; app-only mode also supports web apps
+   - **Name**: For example, "mcp-buddy". Reddit rejects client names containing "reddit".
+   - **App type**: Use **"script"** for password-grant authentication or **"web app"** for OAuth consent with a refresh token. App-only mode supports both.
    - **Description**: Optional
    - **About URL**: Leave blank
-   - **Redirect URI**: `http://localhost:8080` (required but unused)
+   - **Redirect URI**: Your registered OAuth callback, such as `http://localhost:8080`. It is unused by password-grant authentication.
 4. **Complete app registration** as directed by Reddit. If creation is unavailable, follow up through Reddit's access request process.
 5. **Find your credentials:**
-   - **Client ID**: The string under "personal use script"
+   - **Client ID**: The string beneath the app's name and type
    - **Client Secret**: The secret string
 6. **Update your Claude Desktop config:**
 
@@ -197,6 +197,24 @@ Without credentials, `browse_subreddit` can use public RSS feeds and `reddit_exp
 }
 ```
 
+### Web apps with OAuth consent
+
+An approved web app can authenticate a user without their Reddit password. Complete Reddit's [authorization-code flow](https://github.com/reddit-archive/reddit/wiki/OAuth2#authorization) with your registered redirect URI, a random `state` value that your callback verifies, and `duration=permanent` to obtain a refresh token. Request `identity`, `read`, and `history` for the read-only tools; Reddit documents each endpoint's required scope in its [API reference](https://www.reddit.com/dev/api).
+
+Set these variables in the server's environment:
+
+```json
+{
+  "REDDIT_CLIENT_ID": "your_client_id",
+  "REDDIT_CLIENT_SECRET": "your_client_secret",
+  "REDDIT_REFRESH_TOKEN": "your_refresh_token"
+}
+```
+
+Leave `REDDIT_PASSWORD` unset when using a refresh token. Setting both is rejected at startup. The server exchanges the refresh token for access tokens as needed and does not write environment credentials to `auth.json`. Refresh tokens loaded from that file are not used; configure this mode through the environment.
+
+Treat a refresh token like a password. Keep it outside version control and revoke access in [Reddit app preferences](https://www.reddit.com/prefs/apps) when it is no longer needed. OAuth consent does not grant Reddit API approval or extend the approved use case.
+
 ### Three-Tier Authentication System
 
 Reddit MCP Buddy enforces these local caps. They are not Reddit API quotas or guaranteed throughput:
@@ -205,19 +223,19 @@ Reddit MCP Buddy enforces these local caps. They are not Reddit API quotas or gu
 |------|------------|---------------------|----------|
 | **Anonymous** | 10 req/min* | None | Testing, light usage |
 | **App-Only** | 60 req/min | Client ID + Secret | Regular browsing |
-| **Authenticated** | 100 req/min | All 4 credentials | Heavy usage, automation |
+| **Authenticated** | 100 req/min | Client ID + Secret, plus refresh token or username/password | Heavy usage, automation |
 
 *\*Server-side cap. Anonymous requests are served from Reddit's logged-out RSS feed, which applies its own stricter per-IP throttle (often one uncached request per 25-60 seconds). The 15-minute cache and automatic retries absorb much of this, but sustained anonymous browsing is effectively slower than 10 req/min.*
 
 #### How It Works:
 - **Anonymous Mode**: Default mode, no setup required. Only `browse_subreddit` (plus the offline `reddit_explain`) works: Reddit blocks the logged-out JSON API, so browse results come from Reddit's public RSS feed (`data_source: "rss"`) with engagement metrics and NSFW flags as `null`. The remaining tools require credentials.
 - **App-Only Mode**: Uses OAuth2 client credentials grant (works with both script and web apps)
-- **Authenticated Mode**: Uses OAuth2 password grant (requires script app type)
+- **Authenticated Mode**: Uses OAuth2 refresh-token authentication for an authorized web app, or password grant for a script app
 
 **Important Notes**:
-- This server uses client credentials for app-only mode and the password grant for authenticated mode.
-- Web apps use app-only mode here. Script apps can use either mode, subject to Reddit approval.
-- Adding a username and password changes this server's local cap; it does not grant a larger quota from Reddit.
+- Client credentials select app-only mode; a refresh token or username/password selects user authentication.
+- A refresh token carries the scopes granted during consent. Missing scopes can prevent individual tools from working.
+- User authentication changes this server's local cap; it does not grant a larger quota from Reddit.
 
 ## Posting (v1.2.0)
 
@@ -542,6 +560,7 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 - Local caps: 10 requests/minute without auth, 60 with app credentials, and 100 with full authentication
 - Reddit applies separate API and RSS limits; the server retries transient failures, but sustained throttling can still fail
 - Reduce request frequency and respect Reddit's rate-limit responses
+- If an error says `Retry in Ns`, wait that long before retrying. The server returns long upstream waits immediately instead of sleeping through the client's request timeout.
 
 **Write tools don't show up**
 - All of these must hold: `REDDIT_BUDDY_WRITE=true`, all 4 credentials set via environment variables, stdio transport (not `--http`), and a working username/password login
@@ -568,6 +587,7 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 | `REDDIT_CLIENT_SECRET` | Reddit app secret | No | Local cap: 60 req/min (with ID) |
 | `REDDIT_USERNAME` | Reddit account username | No | Local cap: 100 req/min (with all 4) |
 | `REDDIT_PASSWORD` | Reddit account password | No | Local cap: 100 req/min (with all 4) |
+| `REDDIT_REFRESH_TOKEN` | OAuth refresh token; leave password unset | No | Local cap: 100 req/min with client ID + secret |
 | `REDDIT_USER_AGENT` | Custom user agent string (applies when credentials are configured) | No | - |
 
 #### Server Configuration
@@ -591,6 +611,35 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 The three rate-floor variables can only tighten the built-in caps. Setting them looser than the defaults does nothing, on purpose, and 0 does not mean "pause posting": it falls back to the default cap.
 
 > **HTTP mode has no authentication.** It binds to localhost so only your machine can reach it, and rejects Host headers outside the loopback set. Setting `REDDIT_BUDDY_HOST=0.0.0.0` exposes it to your whole network - only do that on a trusted network (e.g. inside Docker, which sets it deliberately). On a non-loopback bind the Host check is off by default, since clients legitimately arrive with a container IP or service name; set `REDDIT_BUDDY_ALLOWED_HOSTS` to restrict it. Browser requests are rejected unless their origin is listed in `REDDIT_BUDDY_ALLOWED_ORIGINS`; non-browser clients like Postman are unaffected.
+
+### HTTP and HTTPS Proxies
+
+On Node 22.21.0+ in the 22.x line, or Node 24 and newer, enable Node's built-in proxy support before starting the server. The project's Node 26 Docker image supports this. Check `node --version` first: unsupported versions can ignore these settings and connect directly. Node currently marks this feature as under active development.
+
+```json
+{
+  "mcpServers": {
+    "reddit": {
+      "command": "npx",
+      "args": ["-y", "reddit-mcp-buddy"],
+      "env": {
+        "NODE_USE_ENV_PROXY": "1",
+        "HTTP_PROXY": "http://proxy.example.com:8080",
+        "HTTPS_PROXY": "http://proxy.example.com:8080",
+        "NO_PROXY": "localhost,127.0.0.1"
+      }
+    }
+  }
+}
+```
+
+`HTTP_PROXY` routes HTTP requests; `HTTPS_PROXY` routes HTTPS requests, including Reddit API and RSS calls. `NO_PROXY` excludes matching hosts. Export these variables in your shell for CLI use, or pass them with Docker's `-e` options. Set them in the process environment before startup; the server does not load a project `.env` file automatically.
+
+Inside Docker, `localhost` refers to the container. On Docker Desktop, use `host.docker.internal` to reach a proxy running on the host.
+
+Proxy authentication can be included in the proxy URL as `http://username:password@proxy.example.com:8080`. Treat that value as a credential and redact it from shared logs and configuration. For a network that uses a private certificate authority, use `NODE_EXTRA_CA_CERTS` with your organization's PEM certificate file instead of disabling TLS verification.
+
+See [Node's proxy and certificate configuration guide](https://nodejs.org/learn/http/enterprise-network-configuration). Proxy support routes network traffic; it does not grant Reddit API approval or bypass Reddit's access rules.
 
 ## Technical Details
 
