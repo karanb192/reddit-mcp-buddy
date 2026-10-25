@@ -57,9 +57,9 @@ export class RedditAPI {
   // "private or quarantined" here sends the model off trying other
   // subreddits when the real cause is the logged-out IP block.
   private readonly ANON_BLOCKED_MESSAGE =
-    'Reddit blocks logged-out API access from this network (HTTP 403). ' +
-    'This tool needs Reddit API credentials (see README -> Authentication); ' +
-    'browse_subreddit still works via RSS.';
+    'Reddit rejected anonymous API access. This tool needs approved Reddit API ' +
+    'credentials (see README -> Authentication); browse_subreddit may still work ' +
+    'via RSS.';
 
   constructor(options: RedditAPIOptions) {
     this.auth = options.authManager;
@@ -394,7 +394,6 @@ export class RedditAPI {
     } = {}
   ): Promise<[RedditListing<RedditPost>, RedditListing<RedditComment>]> {
     const { limit = 50, sort = 'best', depth = 3 } = options;
-    this.assertAnonJsonAllowed();
 
     // Extract subreddit and post ID from various formats
     let subreddit: string;
@@ -418,6 +417,7 @@ export class RedditAPI {
 
       // Handle short URLs (redd.it) where subreddit is empty - fall through to lookup
       if (!subreddit) {
+        this.assertAnonJsonAllowed();
         const infoData = await this.get<RedditListing<RedditPost>>(
           `/api/info.json?id=t3_${encodeURIComponent(id)}`
         );
@@ -431,6 +431,7 @@ export class RedditAPI {
       id = postId;
 
       // Fetch post info to get subreddit
+      this.assertAnonJsonAllowed();
       const infoData = await this.get<RedditListing<RedditPost>>(
         `/api/info.json?id=t3_${encodeURIComponent(id)}`
       );
@@ -448,6 +449,7 @@ export class RedditAPI {
     if (cached) {
       return cached;
     }
+    this.assertAnonJsonAllowed();
 
     const params = new URLSearchParams({
       limit: String(limit),

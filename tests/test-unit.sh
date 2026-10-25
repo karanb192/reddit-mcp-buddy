@@ -1356,10 +1356,11 @@ ANON_403_RESULT=$(HOME="$(mktemp -d)" USERPROFILE="$(mktemp -d)" node --input-ty
   delete process.env.REDDIT_PASSWORD;
   const auth = new AuthManager();
   await auth.load();
+  const cache = new CacheManager();
   const api = new RedditAPI({
     authManager: auth,
     rateLimiter: new RateLimiter({ limit: 20, window: 15 * 60 * 1000, name: "anon" }),
-    cacheManager: new CacheManager(),
+    cacheManager: cache,
   });
 
   // a) the search request itself gets a 403: ask for credentials, one request
@@ -1387,7 +1388,16 @@ ANON_403_RESULT=$(HOME="$(mktemp -d)" USERPROFILE="$(mktemp -d)" node --input-ty
   const t4 = second === first;
   const t5 = calls === 0;
 
-  console.log((t1 && t2 && t3 && t4 && t5) ? "pass" : "fail:" + JSON.stringify({ first, second, calls }));
+  // c) a cached post is returned even while the block is latched: the check
+  // sits after URL parsing and the cache lookup, before the request
+  const key = CacheManager.createKey("post", "programming", "ok1", "best", 50, 3);
+  const cachedPair = [{ data: { children: [] } }, { data: { children: [] } }];
+  cache.set(key, cachedPair);
+  calls = 0;
+  const got = await api.getPost("https://www.reddit.com/r/programming/comments/ok1/t/");
+  const t6 = got === cachedPair && calls === 0;
+
+  console.log((t1 && t2 && t3 && t4 && t5 && t6) ? "pass" : "fail:" + JSON.stringify({ first, second, calls, cached: got === cachedPair }));
 ' 2>/dev/null)
 assert "Logged-out 403 asks for credentials, then fails fast without a request" "[ \"$ANON_403_RESULT\" = \"pass\" ]"
 
