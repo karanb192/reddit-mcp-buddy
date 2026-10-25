@@ -74,6 +74,12 @@ jobs:
       - name: Run unit tests
         run: bash tests/test-unit.sh
 
+      # The three v1.2.0 write modules (write-gate, write-errors, tools/write)
+      # carry a 100% line/function/branch/statement floor, per file. Any new
+      # untested branch in them fails CI here instead of landing silently.
+      - name: Enforce 100% coverage on write modules
+        run: npm run test:coverage
+
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
