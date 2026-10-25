@@ -2378,6 +2378,64 @@ if ! echo "$ELICIT_RESULT" | grep -q '^pass$'; then
 fi
 assert "Elicitation gate: decline/cancel/soft-accept send nothing, confirmed accept posts once, instructions gated" "echo \"\$ELICIT_RESULT\" | grep -q '^pass$'"
 
+log_subsection "2y. Anonymous 403 asks for credentials (reddit-api.ts) — NEW"
+
+ANON_403_RESULT=$(HOME="$(mktemp -d)" USERPROFILE="$(mktemp -d)" node --input-type=module -e '
+  import { RedditAPI } from "./dist/services/reddit-api.js";
+  import { AuthManager } from "./dist/core/auth.js";
+  import { RateLimiter } from "./dist/core/rate-limiter.js";
+  import { CacheManager } from "./dist/core/cache.js";
+
+  delete process.env.REDDIT_CLIENT_ID;
+  delete process.env.REDDIT_CLIENT_SECRET;
+  delete process.env.REDDIT_USERNAME;
+  delete process.env.REDDIT_PASSWORD;
+  const auth = new AuthManager();
+  await auth.load();
+  const cache = new CacheManager();
+  const api = new RedditAPI({
+    authManager: auth,
+    rateLimiter: new RateLimiter({ limit: 20, window: 15 * 60 * 1000, name: "anon" }),
+    cacheManager: cache,
+  });
+
+  // a) the search request itself gets a 403: ask for credentials, one request
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response("Blocked", { status: 403, headers: { "content-type": "text/html" } });
+  };
+  let first = "";
+  try { await api.search("claude code"); } catch (e) { first = e.message; }
+  const t1 = /credentials/.test(first);
+  const t2 = !/private|quarantined/i.test(first);
+  const t3 = /browse_subreddit/.test(first) && calls === 1;
+
+  // b) browse proves the block (json 403 + rss ok) and latches it; search
+  // then fails fast without spending a request
+  const feed = "<?xml version=\"1.0\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"></feed>";
+  globalThis.fetch = async (url) => String(url).includes(".rss")
+    ? new Response(feed, { status: 200, headers: { "content-type": "application/atom+xml" } })
+    : new Response("blocked", { status: 403 });
+  await api.browseSubreddit("programming", "hot", { limit: 1 });
+  calls = 0;
+  let second = "";
+  try { await api.search("claude code again"); } catch (e) { second = e.message; }
+  const t4 = second === first;
+  const t5 = calls === 0;
+
+  // c) a cached post is returned even while the block is latched: the check
+  // sits after URL parsing and the cache lookup, before the request
+  const key = CacheManager.createKey("post", "programming", "ok1", "best", 50, 3);
+  const cachedPair = [{ data: { children: [] } }, { data: { children: [] } }];
+  cache.set(key, cachedPair);
+  calls = 0;
+  const got = await api.getPost("https://www.reddit.com/r/programming/comments/ok1/t/");
+  const t6 = got === cachedPair && calls === 0;
+
+  console.log((t1 && t2 && t3 && t4 && t5 && t6) ? "pass" : "fail:" + JSON.stringify({ first, second, calls, cached: got === cachedPair }));
+' 2>/dev/null)
+assert "Logged-out 403 asks for credentials, then fails fast without a request" "[ \"$ANON_403_RESULT\" = \"pass\" ]"
 assert "API retries return long waits immediately and preserve transient recovery" "node tests/api-access-unit.mjs"
 assert "OAuth refresh auth: grants, scopes, credential isolation, and redacted failures" "node tests/auth-refresh-unit.mjs"
 
