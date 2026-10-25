@@ -11,6 +11,7 @@ async function scenario(mode) {
   let closed = 0;
   let connections = 0;
   const api = {
+    auth: { hasScopes: () => mode !== 'missing-scopes' },
     async getSubredditAboutFull() {
       return { subreddit_type: mode === 'public' ? 'public' : 'private', user_is_moderator: mode !== 'non-moderator' };
     },
@@ -86,6 +87,11 @@ assert.deepEqual(ok.deleted, ['t1_c1', 't3_p1']);
 assert.equal(ok.state.exitCode, 0);
 assert.ok(ok.logs.includes('LIVE_CLEANUP_OK'));
 
+const missingScopes = await scenario('missing-scopes');
+assert.equal(missingScopes.writes, 0);
+assert.equal(missingScopes.state.exitCode, 1);
+assert.deepEqual(missingScopes.deleted, []);
+
 const commentFailure = await scenario('comment-failure');
 assert.deepEqual(commentFailure.deleted, ['t3_p1']);
 assert.equal(commentFailure.state.exitCode, 1);
@@ -132,4 +138,4 @@ for (const mode of ['post-read-failure', 'comment-read-failure']) {
   assert.equal(result.items.size, 0, 'known IDs must be deleted even before they appear in user listings');
   assert.deepEqual(result.deleted, mode === 'post-read-failure' ? ['t3_p1'] : ['t1_c1', 't3_p1']);
 }
-console.log('LIVE-CLEANUP: pass (13 scenarios)');
+console.log('LIVE-CLEANUP: pass (14 scenarios)');

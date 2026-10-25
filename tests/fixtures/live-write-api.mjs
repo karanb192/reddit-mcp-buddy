@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
 
 const stateFile = process.env.SANDBOX_FIXTURE_STATE;
 if (!stateFile) throw new Error('Offline fixture requires an explicit state file');
@@ -11,7 +12,16 @@ globalThis.fetch = async (input, options = {}) => {
   if (!['www.reddit.com', 'oauth.reddit.com'].includes(url.hostname)) throw new Error('Unexpected fixture host');
   const state = JSON.parse(readFileSync(stateFile, 'utf8'));
   const path = url.pathname;
-  if (path === '/api/v1/access_token') return json({ access_token: 'offline-token', token_type: 'bearer', expires_in: 3600, scope: '*' });
+  if (path === '/api/v1/access_token') {
+    const form = new URLSearchParams(options.body);
+    assert.equal(form.get('grant_type'), process.env.REDDIT_REFRESH_TOKEN ? 'refresh_token' : 'password');
+    if (process.env.REDDIT_REFRESH_TOKEN) {
+      assert.equal(form.get('refresh_token'), 'offline-refresh');
+      assert.equal(form.has('password'), false);
+    }
+    return json({ access_token: 'offline-token', token_type: 'bearer', expires_in: 3600,
+      scope: process.env.REDDIT_REFRESH_TOKEN ? 'identity read submit flair edit history' : '*' });
+  }
   if (path === '/api/v1/me') return json({ name: 'sandbox_test_user' });
   if (path === '/r/private_test/about.json') return json({ data: { subreddit_type: 'private', user_is_moderator: true, submission_type: 'self' } });
   if (path === '/r/private_test/about/rules.json') return json({ rules: [] });

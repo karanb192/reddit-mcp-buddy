@@ -20,19 +20,25 @@ try {
     SANDBOX_FIXTURE_STATE: stateFile,
     NODE_OPTIONS: '--import=' + fileURLToPath(new URL('./fixtures/live-write-api.mjs', import.meta.url)),
   });
-  writeFileSync(stateFile, JSON.stringify({ items: {}, actions: [] }));
   await import('./fixtures/live-write-api.mjs');
   const { createSharedServices } = await import('../dist/mcp-server.js');
-  const shared = await createSharedServices();
-  const logs = [];
-  const passed = await runLiveWrite({ shared, sub: 'private_test', marker: 'offline-stdio-test',
-    sleep: async () => {}, log: text => logs.push(text) });
-  assert.ok(passed, logs.join('\n'));
-  for (const expected of ['LIVE_DECLINE_OK', 'LIVE_PREVIEW_OK', 'LIVE_CLEANUP_OK']) assert.ok(logs.includes(expected));
-  const state = JSON.parse(readFileSync(stateFile, 'utf8'));
-  assert.deepEqual(state.actions, ['submit', 'comment', 'delete:t1_c1', 'delete:t3_p1']);
-  assert.deepEqual(state.items, {});
-  console.log('OFFLINE-STDIO: pass (real MCP transports; fixture Reddit API, no network)');
+  for (const mode of ['password', 'refresh']) {
+    if (mode === 'refresh') {
+      delete process.env.REDDIT_PASSWORD;
+      process.env.REDDIT_REFRESH_TOKEN = 'offline-refresh';
+    }
+    writeFileSync(stateFile, JSON.stringify({ items: {}, actions: [] }));
+    const shared = await createSharedServices();
+    const logs = [];
+    const passed = await runLiveWrite({ shared, sub: 'private_test', marker: 'offline-stdio-test',
+      sleep: async () => {}, log: text => logs.push(text) });
+    assert.ok(passed, logs.join('\n'));
+    for (const expected of ['LIVE_DECLINE_OK', 'LIVE_PREVIEW_OK', 'LIVE_CLEANUP_OK']) assert.ok(logs.includes(expected));
+    const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+    assert.deepEqual(state.actions, ['submit', 'comment', 'delete:t1_c1', 'delete:t3_p1']);
+    assert.deepEqual(state.items, {});
+  }
+  console.log('OFFLINE-STDIO: pass (password and refresh auth; real MCP transports; no network)');
 } finally {
   globalThis.fetch = originalFetch;
   for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];

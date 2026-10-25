@@ -29,6 +29,7 @@ process.env.REDDIT_CLIENT_ID = 'testclientid';
 process.env.REDDIT_CLIENT_SECRET = 'testsecret';
 process.env.REDDIT_USERNAME = 'testuser';
 process.env.REDDIT_PASSWORD = 'testpass';
+delete process.env.REDDIT_REFRESH_TOKEN;
 
 // Capture stderr chatter (API error logs, WRITE audit lines) so asserts can
 // inspect it and the suite output stays readable.

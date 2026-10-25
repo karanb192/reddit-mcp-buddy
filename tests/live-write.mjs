@@ -70,6 +70,8 @@ export async function runLiveWrite({ shared, sub, marker, connect = connectStdio
     assert.ok(marker && marker.length < 200, 'a unique test marker is required');
     assert.ok(shared.writeStatus.enabled && shared.writeTools, 'write access not enabled');
     api = shared.writeTools.api;
+    assert.ok(api.auth.hasScopes(['identity', 'read', 'submit', 'flair', 'edit', 'history']),
+      'live validation requires identity, read, submit, flair, edit, and history scopes for posting, recovery, and cleanup');
     const about = await api.getSubredditAboutFull(sub);
     assert.ok(about?.subreddit_type === 'private' && about?.user_is_moderator === true,
       'sandbox must be private and the acting user must be a moderator');
@@ -179,8 +181,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       actions: ['decline post', 'approve post through MCP', 'preview comment', 'repeat exact comment', 'delete and verify both'],
       writes_performed: 0 }, null, 2));
   } else {
-    for (const key of ['REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET', 'REDDIT_USERNAME', 'REDDIT_PASSWORD', 'REDDIT_TEST_SUBREDDIT']) {
+    for (const key of ['REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET', 'REDDIT_TEST_SUBREDDIT']) {
       if (!process.env[key]?.trim()) throw new Error('Missing required local configuration: ' + key);
+    }
+    if (!process.env.REDDIT_REFRESH_TOKEN?.trim() && !(process.env.REDDIT_USERNAME?.trim() && process.env.REDDIT_PASSWORD?.trim())) {
+      throw new Error('Live validation requires REDDIT_REFRESH_TOKEN or REDDIT_USERNAME and REDDIT_PASSWORD');
     }
     if (process.env.RUN_WRITE_TESTS !== '1') throw new Error('Live writes require RUN_WRITE_TESTS=1 and --run');
     process.env.REDDIT_BUDDY_HTTP = 'false';

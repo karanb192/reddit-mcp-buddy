@@ -166,10 +166,8 @@ function parseEnvBoolean(envValue: string | undefined): boolean {
  *   1. REDDIT_BUDDY_WRITE is truthy (off by default in the public package)
  *   2. not HTTP mode: the HTTP transport has no authentication, so write
  *      tools there would be an unauthenticated posting proxy on /mcp
- *   3. full user credentials (username + password), sourced from ENV vars:
- *      --auth file setups never persist the password, so after a restart
- *      they hold app-only tokens, which cannot post
- *   4. a live /api/v1/me probe proves the token carries real user context
+ *   3. user credentials sourced from environment variables
+ *   4. a live /api/v1/me probe verifies identity and granted write scopes
  */
 async function evaluateWriteAccess(auth: AuthManager, api: RedditAPI): Promise<WriteAccessStatus> {
   if (!parseEnvBoolean(process.env.REDDIT_BUDDY_WRITE)) {
@@ -178,17 +176,24 @@ async function evaluateWriteAccess(auth: AuthManager, api: RedditAPI): Promise<W
   if (parseEnvBoolean(process.env.REDDIT_BUDDY_HTTP)) {
     return { enabled: false, reason: 'writes are stdio-only: REDDIT_BUDDY_HTTP is set, and the HTTP transport has no authentication' };
   }
-  if (!auth.hasFullAuth()) {
-    return { enabled: false, reason: 'posting needs full user credentials: set REDDIT_USERNAME and REDDIT_PASSWORD alongside REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET' };
+  if (!auth.hasUserContext()) {
+    return { enabled: false, reason: 'posting needs user credentials: set REDDIT_REFRESH_TOKEN or REDDIT_USERNAME and REDDIT_PASSWORD alongside REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET' };
   }
   if (!auth.credentialsFromEnv()) {
-    return { enabled: false, reason: 'credentials came from the --auth file, which never stores the password; after a restart those tokens are app-only and cannot post. Provide credentials via environment variables instead' };
+    return { enabled: false, reason: 'credentials came from the --auth file. Posting requires user credentials via environment variables instead' };
   }
   try {
     const me = await api.getMe();
     const name = typeof me?.name === 'string' && me.name.length > 0 ? me.name : undefined;
     if (!name) {
       return { enabled: false, reason: 'the /api/v1/me startup probe returned no user identity (an app-only token cannot post)' };
+    }
+    const expected = auth.getUsername();
+    if (expected && expected.toLowerCase() !== name.toLowerCase()) {
+      return { enabled: false, reason: 'the /api/v1/me identity does not match REDDIT_USERNAME' };
+    }
+    if (!auth.hasScopes(['identity', 'read', 'submit', 'flair'])) {
+      return { enabled: false, reason: 'posting requires the granted OAuth scopes identity, read, submit, and flair. Reauthorize the app with these scopes' };
     }
     return { enabled: true, actingUser: name };
   } catch (error) {

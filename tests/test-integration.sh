@@ -877,7 +877,7 @@ assert_contains "Stdio: returns all 5 tools" "$STDIO_RESULT" '"reddit_explain"'
 # self-skips loudly, so the PR workflow (which never sets RUN_WRITE_TESTS)
 # and dev machines with credentials stay write-free by default:
 #   1. RUN_WRITE_TESTS=1
-#   2. full user credentials in env (REDDIT_USERNAME + REDDIT_PASSWORD too)
+#   2. client credentials plus a refresh token or username/password in env
 #   3. REDDIT_TEST_SUBREDDIT naming the private sandbox subreddit
 
 log_section "SECTION 7: Live Write Tests (opt-in)"
@@ -886,12 +886,12 @@ log_subsection "7a. Sandbox post / comment / delete round-trip"
 
 if [ "${RUN_WRITE_TESTS:-}" != "1" ]; then
   skip_test "live write round-trip (post, verify, comment, delete)" "RUN_WRITE_TESTS=1 not set (the default: CI and normal dev runs never write)"
-elif [ "$HAS_CREDS" != "1" ] || [ -z "${REDDIT_USERNAME:-}" ] || [ -z "${REDDIT_PASSWORD:-}" ]; then
-  skip_test "live write round-trip (post, verify, comment, delete)" "full user credentials (REDDIT_USERNAME + REDDIT_PASSWORD) are required to post"
+elif [ "$HAS_CREDS" != "1" ] || { [ -z "${REDDIT_REFRESH_TOKEN:-}" ] && { [ -z "${REDDIT_USERNAME:-}" ] || [ -z "${REDDIT_PASSWORD:-}" ]; }; }; then
+  skip_test "live write round-trip (post, verify, comment, delete)" "client credentials plus REDDIT_REFRESH_TOKEN or REDDIT_USERNAME and REDDIT_PASSWORD are required"
 elif [ -z "${REDDIT_TEST_SUBREDDIT:-}" ]; then
   skip_test "live write round-trip (post, verify, comment, delete)" "REDDIT_TEST_SUBREDDIT (your private sandbox subreddit) is not set"
 else
-  echo -e "  ${YELLOW}⚠ RUN_WRITE_TESTS=1: writing to the private sandbox r/${REDDIT_TEST_SUBREDDIT} as u/${REDDIT_USERNAME}${NC}"
+  echo -e "  ${YELLOW}⚠ RUN_WRITE_TESTS=1: writing to the private sandbox r/${REDDIT_TEST_SUBREDDIT} after verifying account identity${NC}"
 
   # Exercise the real MCP stdio connection, then recover and verify cleanup.
   WRITE_LIVE_OUTPUT=$(REDDIT_BUDDY_WRITE=true node tests/live-write.mjs --run 2>&1)

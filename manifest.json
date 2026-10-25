@@ -118,7 +118,7 @@
     "enable_write_tools": {
       "type": "boolean",
       "title": "Enable posting tools",
-      "description": "Adds create_post, add_comment, and subreddit_rules. Needs all four Reddit credentials above (posting uses your account) and only works over stdio. Off by default. Uses a confirmation prompt when supported; otherwise approval depends on the client before repeating an identical previewed payload.",
+      "description": "Adds create_post, add_comment, and subreddit_rules over stdio. Requires client credentials plus a refresh token or username/password, with identity/read/submit/flair scopes. Off by default. Uses a confirmation prompt when supported; otherwise approval depends on the client before repeating an identical previewed payload.",
       "required": false,
       "default": false
     }

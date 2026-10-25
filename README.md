@@ -271,7 +271,9 @@ Add `REDDIT_BUDDY_WRITE` next to your existing credentials:
 
 Claude Desktop extension users: flip the **Enable posting tools** toggle in the extension settings instead. It maps to the same `REDDIT_BUDDY_WRITE` variable.
 
-All four credentials must come from environment variables (or the extension's config fields, which become environment variables). The interactive `--auth` file setup cannot write after a restart: it never saves your password, so on the next start the server only holds app-only tokens, and those cannot post. If any requirement is missing, the server logs exactly which one at startup instead of failing mid-post.
+Alternatively, replace `REDDIT_PASSWORD` with `REDDIT_REFRESH_TOKEN` from the web-app consent flow above. Posting requires the granted scopes `identity`, `read`, `submit`, and `flair`. Add `history` if you also use `user_analysis`. `REDDIT_USERNAME` is optional with a refresh token; when provided, it must match the account returned by Reddit.
+
+Credentials must come from environment variables (or extension config fields, which become environment variables). The interactive `--auth` file setup does not enable posting. Startup verifies the account through Reddit and checks granted scopes. If any requirement is missing, the server logs the reason and keeps posting tools disabled.
 
 ### The safety model, in plain words
 
@@ -287,7 +289,7 @@ Posting uses your account. The server enforces registration, rate limits, and du
 
 ### Know the trade-off before enabling
 
-Reddit's password grant returns a token with **full account scope**. With posting off, the server uses those credentials for reads; with posting on, they can do anything your account can do. The credentials themselves were always this powerful (that is how Reddit's script-app auth works), but enabling write means the server actually exercises that power, so treat the config file accordingly: keep it out of version control and off shared machines.
+Reddit's password grant returns a token with **full account scope**. An OAuth refresh token carries the permissions granted during consent. These permissions apply across the account, not just one subreddit. With posting off, the server uses the credentials for reads; enabling posting lets it submit posts and comments. Keep passwords and refresh tokens out of version control and off shared machines.
 
 Also worth knowing: Reddit applies its own account-level posting throttles on top of everything above, based on account age and karma. If Reddit says "try again in N minutes", the server surfaces the wait instead of hammering.
 
@@ -378,7 +380,7 @@ npm run build
 REDDIT_TEST_SUBREDDIT=your_private_sub node tests/live-write.mjs
 ```
 
-The live run requires an approved script app, all four `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, and `REDDIT_PASSWORD` values in the local environment, and a private subreddit moderated by that user. Keep credentials outside the repository. On Node versions supporting `--env-file`, a local environment file can supply them:
+The live run requires an approved app, `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`, plus either `REDDIT_REFRESH_TOKEN` or the script-app `REDDIT_USERNAME`/`REDDIT_PASSWORD` pair. The account must moderate the private test subreddit. OAuth validation requires all six scopes: `identity`, `read`, `submit`, `flair`, `history` for recovery, and `edit` for cleanup. The harness checks these before connecting any posting client. Keep credentials outside the repository. On Node versions supporting `--env-file`, a local environment file can supply them:
 
 ```bash
 RUN_WRITE_TESTS=1 REDDIT_TEST_SUBREDDIT=your_private_sub \
@@ -563,7 +565,7 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 - If an error says `Retry in Ns`, wait that long before retrying. The server returns long upstream waits immediately instead of sleeping through the client's request timeout.
 
 **Write tools don't show up**
-- All of these must hold: `REDDIT_BUDDY_WRITE=true`, all 4 credentials set via environment variables, stdio transport (not `--http`), and a working username/password login
+- All of these must hold: `REDDIT_BUDDY_WRITE=true`, client credentials plus a refresh token or username/password via environment variables, stdio transport, a verified user identity, and granted `identity`/`read`/`submit`/`flair` scopes
 - The startup log (stderr) names exactly which condition failed
 - `--auth` file setups cannot write: the password is never saved, so restarts fall back to app-only tokens. Move credentials into your MCP client config's `env` block
 - HTTP mode never registers write tools, by design (the HTTP endpoint has no authentication)
@@ -603,7 +605,7 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 #### Posting (v1.2.0)
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `REDDIT_BUDDY_WRITE` | Register the [posting tools](#posting-v120) (needs all 4 credentials via env, stdio transport) | `false` |
+| `REDDIT_BUDDY_WRITE` | Register the [posting tools](#posting-v120); requires env user credentials, verified identity and scopes, and stdio | `false` |
 | `REDDIT_BUDDY_MAX_POSTS_PER_HOUR` | Posts per hour; only values from 1 to 4 are honored (0 and invalid values are ignored) | `5` |
 | `REDDIT_BUDDY_MAX_COMMENTS_PER_HOUR` | Comments per hour; only values from 1 to 29 are honored (0 and invalid values are ignored) | `30` |
 | `REDDIT_BUDDY_MIN_WRITE_INTERVAL_S` | Seconds between writes; only values ABOVE 15 are honored | `15` |

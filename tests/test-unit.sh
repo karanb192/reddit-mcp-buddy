@@ -2269,6 +2269,7 @@ assert "write-unit.mjs: every assert passes (100% coverage floor enforced by npm
 
 assert "live test cleanup: success, failure, recovery, deletion checks, and private-only gate" "node tests/live-cleanup-unit.mjs"
 assert "sandbox harness: real MCP stdio confirmation and fallback with an offline API" "node tests/live-stdio-unit.mjs"
+assert "OAuth posting: granted scopes, identity checks, disabled modes, and no automatic write retry" "node tests/oauth-write-unit.mjs"
 
 
 # --------------------------------------------------------------------------
