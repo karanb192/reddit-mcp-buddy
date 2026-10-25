@@ -556,7 +556,7 @@ RATE_LIMITER_RESULT=$(node --input-type=module -e "
   const rl2 = new RateLimiter({ limit: 1, window: 60000 });
   rl2.recordRequest();
   const errMsg = rl2.getErrorMessage(false);
-  const test7 = errMsg.includes('10x more requests') && errMsg.includes('reddit-mcp-buddy --auth');
+  const test7 = errMsg.includes('Approved Reddit API credentials') && errMsg.includes('local cap');
 
   // Error message for authenticated
   const errMsgAuth = rl2.getErrorMessage(true);

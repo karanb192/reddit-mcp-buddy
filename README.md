@@ -2,7 +2,7 @@
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables Claude Desktop and other AI assistants to browse Reddit, search posts, and analyze user activity. Clean, fast, and actually works - browse subreddits with no API keys; add Reddit credentials for search, comments, user analysis, and full metrics. Since v1.2.0 it can also post and comment for you: off by default, every submit gated behind a confirmation step, and rate-capped in the server. See [Posting](#posting-v120).
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for browsing Reddit, searching posts, and analyzing user activity. Anonymous browsing uses Reddit's public RSS feeds when available. Search, comments, user analysis, and full metrics require approved Reddit API access. Version 1.2.0 adds optional posting and commenting with per-process caps and a client-dependent confirmation flow. See [Posting](#posting-v120).
 
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![npm downloads](https://img.shields.io/npm/dm/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
@@ -40,13 +40,13 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that en
 
 ## What makes Reddit MCP Buddy different?
 
-- **🚀 Zero setup** - Browse subreddits instantly, no Reddit API registration needed (search, comments, user analysis, and engagement metrics need credentials)
-- **✍️ Opt-in posting (v1.2.0)** - Create posts and comments with server-side confirmations, hard rate caps, and duplicate suppression
-- **⚡ Up to 10x more requests** - Three-tier authentication system (10/60/100 requests per minute)
+- **🚀 Anonymous browsing** - Browse subreddits through public RSS feeds when available; other live-data tools need approved API access
+- **✍️ Opt-in posting (v1.2.0)** - Create posts and comments with a client-dependent confirmation flow, per-process caps, and duplicate suppression
+- **⚡ Local rate limits** - Configured caps of 10/60/100 requests per minute; Reddit applies its own limits
 - **🎯 Clean data** - No fake "sentiment analysis" or made-up metrics
 - **🧠 LLM-optimized** - Built specifically for AI assistants like Claude
 - **📦 TypeScript** - Fully typed, reliable, and maintainable
-- **✅ Proven rate limits** - Thoroughly tested authentication tiers with verification tools
+- **✅ Rate-limit testing** - Verification tools for the server's local authentication tiers
 
 ## Quick Start (30 seconds)
 
@@ -154,29 +154,27 @@ Get explanations of Reddit terms.
 
 ## Authentication (Optional)
 
-Want more requests? Add Reddit credentials to your Claude Desktop config.
+Search, post details, user analysis, and full metrics require Reddit API credentials for an approved app and use case.
 
-### Reddit now requires approval for new API apps
+### Reddit API approval
 
-Since November 2025, Reddit's [Responsible Builder Policy](https://www.reddit.com/r/redditdev/comments/1oug31u/introducing_the_responsible_builder_policy_new/) requires new developers to request access before building on the API. What that means for you:
+Reddit's [Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy) requires explicit approval before using its API. Creating an app is not a self-service guarantee of access. Reddit directs developers to [Devvit](https://developers.reddit.com/) first; for use cases Devvit does not support, use [Reddit's API access request form](https://support.reddithelp.com/hc/en-us/requests/new?tf_42139884615700=api_request_type_developer_clone&ticket_form_id=14868593862164).
 
-- **Already have credentials?** Existing apps keep working. Nothing changes for you.
-- **Anonymous mode still works** with zero setup: `browse_subreddit` (via Reddit's public RSS feed) and `reddit_explain` need no credentials at all.
-- **Creating credentials for the first time?** You now need Reddit's approval before your app works. Request access through the process linked in the [policy announcement](https://www.reddit.com/r/redditdev/comments/1oug31u/introducing_the_responsible_builder_policy_new/), then create the app at https://www.reddit.com/prefs/apps once approved. How long approval takes is Reddit's call, not this project's; Reddit has not published a timeline.
+If you already have approved access, use your app's credentials below. This project cannot grant approval or guarantee an approval timeline, and it does not provide shared API keys or a third-party OAuth service.
 
-There is no supported workaround: this server talks to Reddit's official API only, so credentials it uses must be approved ones. If Reddit denies or delays your request, anonymous mode keeps working in the meantime.
+Without credentials, `browse_subreddit` can use public RSS feeds and `reddit_explain` works offline. RSS can be blocked or throttled and does not provide engagement metrics or NSFW flags. It does not enable search, post details, or user analysis, and it does not grant API approval.
 
 ### Setup Steps
 
-1. **Go to** https://www.reddit.com/prefs/apps (new developers: get [approval](https://www.reddit.com/r/redditdev/comments/1oug31u/introducing_the_responsible_builder_policy_new/) first, see above)
-2. **Click** "Create App" or "Create Another App"
+1. **Obtain Reddit API approval** for your app and use case using the links above.
+2. **Open** https://www.reddit.com/prefs/apps and select your approved app. If Reddit instructs you to create an app, follow its instructions.
 3. **Fill out the form:**
    - **Name**: Any name (e.g., "reddit-mcp-buddy")
-   - **App type**: Select **"script"** (CRITICAL for 100 rpm!)
+   - **App type**: Use **"script"** if you need the password-grant mode; app-only mode also supports web apps
    - **Description**: Optional
    - **About URL**: Leave blank
    - **Redirect URI**: `http://localhost:8080` (required but unused)
-4. **Click** "Create app"
+4. **Complete app registration** as directed by Reddit. If creation is unavailable, follow up through Reddit's access request process.
 5. **Find your credentials:**
    - **Client ID**: The string under "personal use script"
    - **Client Secret**: The secret string
@@ -201,9 +199,9 @@ There is no supported workaround: this server talks to Reddit's official API onl
 
 ### Three-Tier Authentication System
 
-Reddit MCP Buddy supports three authentication levels, each with different rate limits:
+Reddit MCP Buddy enforces these local caps. They are not Reddit API quotas or guaranteed throughput:
 
-| Mode | Rate Limit | Required Credentials | Best For |
+| Mode | Local Cap | Required Credentials | Best For |
 |------|------------|---------------------|----------|
 | **Anonymous** | 10 req/min* | None | Testing, light usage |
 | **App-Only** | 60 req/min | Client ID + Secret | Regular browsing |
@@ -217,9 +215,9 @@ Reddit MCP Buddy supports three authentication levels, each with different rate 
 - **Authenticated Mode**: Uses OAuth2 password grant (requires script app type)
 
 **Important Notes**:
-- Script apps support BOTH app-only (60 rpm) and authenticated (100 rpm) modes
-- Web apps only support app-only mode (60 rpm maximum)
-- For 100 requests/minute, you MUST use a script app with username + password
+- This server uses client credentials for app-only mode and the password grant for authenticated mode.
+- Web apps use app-only mode here. Script apps can use either mode, subject to Reddit approval.
+- Adding a username and password changes this server's local cap; it does not grant a larger quota from Reddit.
 
 ## Posting (v1.2.0)
 
@@ -264,14 +262,14 @@ Posting uses your account. The server enforces registration, rate limits, and du
 - **Off by default.** Without `REDDIT_BUDDY_WRITE`, the write tools do not exist: read-only installs see exactly the same 5 tools as before, and pay zero extra context.
 - **stdio only.** The HTTP transport has no authentication, so write tools refuse to register there. No process on your machine or network can turn the HTTP endpoint into a posting proxy.
 - **Confirmation depends on the client.** Clients supporting [MCP elicitation](https://modelcontextprotocol.io/specification/latest) get a confirmation prompt with the target, account, content preview, full content length, and post options. The prompt requires an explicit acceptance. Previews can be truncated, so review the full draft in your client first. Without elicitation, the server requires a preview or successful dry run followed by the identical payload within 15 minutes. It cannot verify that a human approved that repeat: approval depends on the client's tool prompt and the model following instructions. Only enable posting in a client whose approval behavior you trust.
-- **Hourly caps you cannot raise.** At most 5 posts/hour, 30 comments/hour, and 15 seconds between writes, enforced in the server. Environment variables can tighten these, never loosen them. Honest limit: the caps live in the server process (a restart resets the hour, and a fork of this open-source code can remove them). They exist to make casual abuse pointless, not to stop a determined operator.
+- **Hourly caps you cannot raise.** At most 5 posts/hour, 30 comments/hour, and 15 seconds between writes, enforced in the server. Environment variables can tighten these, never loosen them. Honest limit: the caps live in the server process (a restart resets the hour, parallel sessions have separate caps, and a fork of this open-source code can remove them). They exist to make casual abuse pointless, not to stop a determined operator.
 - **Duplicate suppression.** Retrying an identical submit within 15 minutes returns the original post instead of posting twice, including the same content re-drafted for the same sub. Posting the same content to a different subreddit is allowed, with a warning naming the earlier post.
 - **Verified after submit.** Reddit happily returns "success" for posts AutoModerator removes seconds later. The server re-checks after submitting and reports `status: "filtered"` with a warning when that happens, instead of telling you it went live.
 - **Conspicuous logging.** Every allowed write is logged to stderr with the kind, the target (subreddit when known), and the acting user.
 
 ### Know the trade-off before enabling
 
-Reddit's password grant returns a token with **full account scope**. With posting off, the credentials in your config buy higher read limits; with posting on, they can do anything your account can do. The credentials themselves were always this powerful (that is how Reddit's script-app auth works), but enabling write means the server actually exercises that power, so treat the config file accordingly: keep it out of version control and off shared machines.
+Reddit's password grant returns a token with **full account scope**. With posting off, the server uses those credentials for reads; with posting on, they can do anything your account can do. The credentials themselves were always this powerful (that is how Reddit's script-app auth works), but enabling write means the server actually exercises that power, so treat the config file accordingly: keep it out of version control and off shared machines.
 
 Also worth knowing: Reddit applies its own account-level posting throttles on top of everything above, based on account age and karma. If Reddit says "try again in N minutes", the server surfaces the wait instead of hammering.
 
@@ -425,8 +423,7 @@ cd reddit-mcp-buddy
 
 | Feature | Reddit MCP Buddy | Other MCP Tools |
 |---------|-------------|----------------|
-| **Zero Setup** | ✅ Browse instantly; credentials unlock the rest | ❌ Keys required for everything |
-| **Max Rate Limit** | ✅ 100 req/min proven | ❓ Unverified claims |
+| **Anonymous Access** | RSS browsing; other data tools require approved API access | Varies by server |
 | **Language** | TypeScript/Node.js | Python (most) |
 | **Tools Count** | 5 read + 3 opt-in write | 8-10 (redundant) |
 | **Fake Metrics** | ✅ Real data only | ❌ "Sentiment scores" |
@@ -497,11 +494,14 @@ cd reddit-mcp-buddy
 
 ### Common Issues
 
+**"Cannot create an app" or "API approval required"**
+- Follow Reddit's [approval process](#reddit-api-approval); this project cannot approve an app or remove Reddit's restrictions
+- Use credentials only for an app and use case Reddit has approved
+
 **"Can't achieve 100 requests/minute"**
-- Ensure your app type is **"script"** not "web" or "installed"
-- Script apps created by one account can only authenticate as that same account
-- Run `npm run test:rate-limit:auth` to verify (requires cloning the repo)
-- If still failing, create a new script app while logged into the authenticating account
+- The 10/60/100 tiers are this server's local caps, not guaranteed throughput from Reddit
+- Respect Reddit's rate-limit responses; adding account credentials does not increase Reddit's granted quota
+- Run `npm run test:rate-limit:app` or `npm run test:rate-limit:auth` to inspect the corresponding local mode (requires cloning the repo)
 
 **"Command not found" error**
 ```bash
@@ -519,10 +519,9 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 - Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
 
 **Rate limit errors**
-- Without auth: 10 requests/minute server cap, and Reddit's own RSS feed throttles harder per IP (the server retries automatically)
-- With app credentials only: 60 requests/minute
-- With full authentication: 100 requests/minute
-- Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
+- Local caps: 10 requests/minute without auth, 60 with app credentials, and 100 with full authentication
+- Reddit applies separate API and RSS limits; the server retries transient failures, but sustained throttling can still fail
+- Reduce request frequency and respect Reddit's rate-limit responses
 
 **Write tools don't show up**
 - All of these must hold: `REDDIT_BUDDY_WRITE=true`, all 4 credentials set via environment variables, stdio transport (not `--http`), and a working username/password login
@@ -545,10 +544,10 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 #### Authentication Variables
 | Variable | Description | Required | Rate Limit |
 |----------|-------------|----------|------------|
-| `REDDIT_CLIENT_ID` | Reddit app client ID | No | 60 req/min (with secret) |
-| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | 60 req/min (with ID) |
-| `REDDIT_USERNAME` | Reddit account username | No | 100 req/min (with all 4) |
-| `REDDIT_PASSWORD` | Reddit account password | No | 100 req/min (with all 4) |
+| `REDDIT_CLIENT_ID` | Reddit app client ID | No | Local cap: 60 req/min (with secret) |
+| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | Local cap: 60 req/min (with ID) |
+| `REDDIT_USERNAME` | Reddit account username | No | Local cap: 100 req/min (with all 4) |
+| `REDDIT_PASSWORD` | Reddit account password | No | Local cap: 100 req/min (with all 4) |
 | `REDDIT_USER_AGENT` | Custom user agent string (applies when credentials are configured) | No | - |
 
 #### Server Configuration

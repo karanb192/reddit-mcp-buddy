@@ -97,9 +97,9 @@ export class RateLimiter {
     const stats = this.getStats();
     
     if (!authenticated) {
-      return `⚠️ Rate limit reached! You get ${this.limit} requests/min without auth.
+      return `⚠️ Local rate limit reached (${this.limit} requests/min without auth).
 
-Want 10x more requests? Run: reddit-mcp-buddy --auth (2-min setup)
+Approved Reddit API credentials raise this server's local cap. See README Authentication.
 Or wait ${stats.timeUntilReset} seconds...
 
 Cached data may still be available.`;
