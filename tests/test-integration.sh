@@ -903,8 +903,9 @@ else
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const shared = await createSharedServices();
-    const sub = process.env.REDDIT_TEST_SUBREDDIT;
+    const sub = process.env.REDDIT_TEST_SUBREDDIT.trim().replace(/^\/?r\//i, "");
     const marker = "reddit-mcp-buddy test " + randomUUID();
+    console.log("LIVE_MARKER " + marker);
     const commentText = "Integration test comment: " + marker;
     const created = new Set();
     const attempted = { submitted: false, comments: false };

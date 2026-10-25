@@ -2264,10 +2264,10 @@ assert "Write pipeline: preflight matrix, confirmation gate, verify-after-submit
 log_subsection "2af. Write Coverage Suite (tests/write-unit.mjs) - NEW v1.2.0"
 
 WRITECOV_RESULT=$(node tests/write-unit.mjs 2>/dev/null)
-
-assert "live test cleanup: success, failure, recovery, deletion checks, and private-only gate" "node tests/live-cleanup-unit.mjs"
 echo "  $WRITECOV_RESULT" | head -1
 assert "write-unit.mjs: every assert passes (100% coverage floor enforced by npm run test:coverage)" "echo \"\$WRITECOV_RESULT\" | grep -q '^WRITE-UNIT: pass'"
+
+assert "live test cleanup: success, failure, recovery, deletion checks, and private-only gate" "node tests/live-cleanup-unit.mjs"
 
 
 # --------------------------------------------------------------------------

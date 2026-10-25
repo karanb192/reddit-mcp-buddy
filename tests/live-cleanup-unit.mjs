@@ -43,6 +43,7 @@ async function scenario(mode) {
     async createPost(params) {
       assert.equal(params.subreddit, 'private_test');
       writes++;
+      if (mode === 'post-not-found') throw new Error('request failed');
       items.set('t3_p1', { id: 'p1', title: params.title, subreddit: params.subreddit, author: 'test_user' });
       if (mode === 'ambiguous-post') throw new Error('response lost');
       return { post_id: 'p1', status: 'live' };
@@ -50,12 +51,14 @@ async function scenario(mode) {
     async addComment(params) {
       if (mode === 'comment-failure') throw new Error('comment rejected');
       items.set('t1_c1', { id: 'c1', body: params.text, link_id: 't3_' + params.post_id, subreddit: 'private_test', author: 'test_user' });
+      if (mode === 'ambiguous-comment') throw new Error('response lost');
       return { comment_id: 'c1' };
     },
   };
   await driver(async () => ({ writeStatus: { enabled: true }, actingUser: 'test_user', writeTools: tools, cacheManager: { destroy() { destroyed = true; } } }),
     () => 'unique-test-marker', state, { log: text => logs.push(text) }, callback => callback());
   assert.ok(destroyed, 'cache timers must be stopped');
+  assert.ok(logs.some(line => line.startsWith('LIVE_MARKER ')), 'print recovery marker before any write');
   return { deleted, logs, state, writes, items };
 }
 
@@ -73,6 +76,16 @@ assert.deepEqual(ambiguous.deleted, ['t3_p1']);
 assert.equal(ambiguous.items.size, 0);
 assert.equal(ambiguous.state.exitCode, 1);
 
+const ambiguousComment = await scenario('ambiguous-comment');
+assert.deepEqual(ambiguousComment.deleted, ['t1_c1', 't3_p1']);
+assert.equal(ambiguousComment.items.size, 0);
+assert.equal(ambiguousComment.state.exitCode, 1);
+
+const notFound = await scenario('post-not-found');
+assert.deepEqual(notFound.deleted, []);
+assert.ok(notFound.logs.some(line => line.includes('manually check marker')));
+assert.equal(notFound.state.exitCode, 1);
+
 const deleteFailure = await scenario('delete-failure');
 assert.deepEqual(deleteFailure.deleted, ['t1_c1', 't3_p1']);
 assert.equal(deleteFailure.state.exitCode, 1);
@@ -86,4 +99,4 @@ const publicSub = await scenario('public');
 assert.equal(publicSub.writes, 0);
 assert.deepEqual(publicSub.deleted, []);
 assert.equal(publicSub.state.exitCode, 1);
-console.log('LIVE-CLEANUP: pass (6 scenarios)');
+console.log('LIVE-CLEANUP: pass (8 scenarios)');
