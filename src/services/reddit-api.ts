@@ -334,7 +334,7 @@ export class RedditAPI {
       if (response.status === 429 || response.status === 503) {
         const waitMs =
           this.getRetryAfterDelay(response) ??
-          this.getRateLimitResetDelay(response) ??
+          (response.status === 429 ? this.getRateLimitResetDelay(response) : null) ??
           this.calculateBackoff(retries);
         if (retries > 0 && waitMs <= this.MAX_AUTO_RETRY_WAIT_MS) {
           await new Promise(resolve => setTimeout(resolve, waitMs));
@@ -610,10 +610,6 @@ export class RedditAPI {
    * distinguish failure classes (e.g. the anonymous 403 IP-block) without
    * parsing message text.
    */
-  private anonymousAccessError(): Error {
-    return this.httpError('Reddit rejected anonymous API access (HTTP 403). This tool needs approved Reddit API credentials; see README Authentication. browse_subreddit may still work via RSS.', 403);
-  }
-
   private retryWaitError(status: number, waitMs: number): Error {
     const reason = status === 429 ? 'Reddit rate limit' : 'Reddit is temporarily unavailable';
     return this.httpError(`${reason} (HTTP ${status}). Retry in ${Math.ceil(waitMs / 1000)}s.`, status);
@@ -730,9 +726,6 @@ export class RedditAPI {
    * Private: Implementation of GET request with retry logic
    */
   private async getImpl<T>(endpoint: string, retries: number = 2): Promise<T> {
-    if (!this.auth.isAuthenticated() && this.anonJsonBlockedUntil > Date.now()) {
-      throw this.anonymousAccessError();
-    }
     // Check rate limit
     if (!this.rateLimiter.canMakeRequest()) {
       const isAuth = this.auth.isAuthenticated();
@@ -778,7 +771,7 @@ export class RedditAPI {
       if (!response.ok) {
         if (response.status === 503 || response.status === 429) {
           const waitMs = this.getRetryAfterDelay(response)
-            ?? this.getRateLimitResetDelay(response)
+            ?? (response.status === 429 ? this.getRateLimitResetDelay(response) : null)
             ?? this.calculateBackoff(retries);
           if (retries > 0 && waitMs <= this.MAX_AUTO_RETRY_WAIT_MS) {
             await new Promise(resolve => setTimeout(resolve, waitMs));
@@ -794,9 +787,6 @@ export class RedditAPI {
           throw this.httpError(`Not found - r/${subredditName} does not exist or is inaccessible`, 404);
         }
         if (response.status === 403) {
-          if (!isAuthenticated) {
-            throw this.anonymousAccessError();
-          }
           // For 403, try to determine if it's a non-existent subreddit or private
           const subredditMatch = endpoint.match(/\/r\/([^\/]+)/);
           const subredditName = subredditMatch ? subredditMatch[1] : null;

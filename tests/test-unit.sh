@@ -1342,9 +1342,9 @@ TOOLDEF_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
 assert "Tool definitions: 5 tools, readOnlyHint under annotations, schemas intact" "echo \"\$TOOLDEF_RESULT\" | grep -q '^pass$'"
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-assert "API errors identify missing credentials and return long retry waits immediately" "node tests/api-access-unit.mjs"
+assert "API retries return long waits immediately and preserve transient recovery" "node tests/api-access-unit.mjs"
 
+# ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS
 # ═══════════════════════════════════════════════════════════════════════════════
 

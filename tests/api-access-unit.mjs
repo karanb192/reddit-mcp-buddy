@@ -16,35 +16,6 @@ function client(authenticated = false) {
 }
 
 try {
-  globalThis.fetch = async () => new Response('blocked', { status: 403 });
-  const operations = [
-    api => api.search('test'),
-    api => api.search('test', { subreddit: 'programming' }),
-    api => api.getPost('programming_ab123'),
-    api => api.getUser('test_user'),
-  ];
-  for (const operation of operations) {
-    await assert.rejects(operation(client()), error => error.status === 403 && /approved Reddit API credentials/.test(error.message) && !/private|quarantined|Try a public/.test(error.message));
-    await assert.rejects(operation(client(true)), error => error.status === 403 && /private/.test(error.message));
-  }
-
-  let requests = 0;
-  globalThis.fetch = async url => {
-    requests++;
-    return String(url).includes('.rss')
-      ? new Response('<feed xmlns="http://www.w3.org/2005/Atom"></feed>', { headers: { 'content-type': 'application/atom+xml' } })
-      : new Response('blocked', { status: 403 });
-  };
-  const api = client();
-  await api.browseSubreddit('programming');
-  assert.equal(requests, 2);
-  for (const operation of operations) {
-    await assert.rejects(operation(api), /approved Reddit API credentials/);
-  }
-  assert.equal(requests, 2, 'proven anonymous blocks must fail before another request');
-  await api.browseSubreddit('technology');
-  assert.equal(requests, 3, 'RSS browsing remains available');
-
   const waits = [];
   globalThis.setTimeout = (callback, delay, ...args) => {
     waits.push(delay);
@@ -52,6 +23,7 @@ try {
   };
   for (const status of [429, 503]) {
     for (const headers of [{ 'x-ratelimit-reset': '43' }, { 'retry-after': '120' }, { 'retry-after': '6' }]) {
+      if (status === 503 && headers['x-ratelimit-reset']) continue;
       let calls = 0;
       globalThis.fetch = async url => {
         calls++;
@@ -70,6 +42,20 @@ try {
     }
   }
   assert.ok(waits.every(delay => delay === 10000), 'only fetch timeouts, never long retry timers, should be scheduled');
+  for (const rss of [false, true]) {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      if (calls === 1) return new Response('', { status: 503, headers: { 'x-ratelimit-reset': '300' } });
+      return rss
+        ? new Response('<feed xmlns="http://www.w3.org/2005/Atom"></feed>', { headers: { 'content-type': 'application/atom+xml' } })
+        : Response.json({ data: { children: [] } });
+    };
+    const retrying = client(true);
+    if (rss) await retrying.getRSS('/r/test/.rss');
+    else await retrying.search('test');
+    assert.equal(calls, 2, 'quota reset on 503 must not suppress transient recovery');
+  }
   const parsing = client();
   assert.equal(parsing.getRetryAfterDelay(new Response('', { headers: { 'retry-after': 'invalid' } })), null);
   assert.equal(parsing.getRetryAfterDelay(new Response('', { headers: { 'retry-after': '-1' } })), null);
