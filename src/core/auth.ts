@@ -199,6 +199,10 @@ export class AuthManager {
     return this.config;
   }
 
+  invalidateAccessToken(): void {
+    if (this.config) this.config.expiresAt = 0;
+  }
+
   /**
    * Check if authenticated
    */
@@ -452,6 +456,24 @@ export class AuthManager {
   hasScopes(required: readonly string[]): boolean {
     const granted = new Set(this.config?.scope?.split(/\s+/) ?? []);
     return granted.has('*') || required.every(scope => granted.has(scope));
+  }
+
+  /**
+   * True when the loaded credentials came from environment variables.
+   * Write registration requires env-sourced credentials: --auth file setups
+   * never persist the password, so after a restart they degrade to app-only
+   * tokens, which cannot post.
+   */
+  credentialsFromEnv(): boolean {
+    return this.configFromEnv;
+  }
+
+  /**
+   * Username of the acting account, when user credentials are configured.
+   * Write tools echo this so the posting identity is always explicit.
+   */
+  getUsername(): string | undefined {
+    return this.config?.username;
   }
 
   /**

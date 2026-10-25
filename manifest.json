@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "reddit-mcp-buddy",
   "display_name": "Reddit MCP Buddy",
-  "version": "1.1.14",
+  "version": "1.2.0",
   "description": "Browse subreddit RSS feeds in Claude Desktop. Search, post details, and user analysis require approved Reddit API access.",
   "long_description": "Reddit MCP Buddy connects Claude Desktop to Reddit. Anonymous subreddit browsing uses RSS, which Reddit can block or throttle. Search, post details, and user analysis require approved Reddit API access and credentials. See the README Authentication section for Reddit's approval process.\n\n**Features:**\n• Browse subreddit posts\n• Search Reddit content with approved API access\n• Analyze user profiles with approved API access\n• Get post details and comments with approved API access\n• Explain Reddit terminology offline\n• Cache responses to reduce repeated requests\n\nThe server uses local caps of 10, 60, or 100 requests per minute depending on authentication mode. These are not Reddit quotas or guaranteed throughput; Reddit applies its own limits. Adding a username and password does not grant extra Reddit quota.\n\nRuns on Windows, macOS, and Linux.",
   "author": {
@@ -28,7 +28,8 @@
         "REDDIT_CLIENT_SECRET": "${user_config.reddit_client_secret}",
         "REDDIT_USERNAME": "${user_config.reddit_username}",
         "REDDIT_PASSWORD": "${user_config.reddit_password}",
-        "REDDIT_REFRESH_TOKEN": "${user_config.reddit_refresh_token}"
+        "REDDIT_REFRESH_TOKEN": "${user_config.reddit_refresh_token}",
+        "REDDIT_BUDDY_WRITE": "${user_config.enable_write_tools}"
       }
     }
   },
@@ -52,6 +53,18 @@
     {
       "name": "reddit_explain",
       "description": "Explain Reddit terminology, culture, and inside jokes"
+    },
+    {
+      "name": "create_post",
+      "description": "Submit a text or link post to a subreddit (requires opting in via Enable posting tools)"
+    },
+    {
+      "name": "add_comment",
+      "description": "Comment on a post or reply to a comment (requires opting in via Enable posting tools)"
+    },
+    {
+      "name": "subreddit_rules",
+      "description": "Fetch a subreddit's rules, posting requirements, and flair choices before posting"
     }
   ],
   "keywords": [
@@ -101,6 +114,13 @@
       "description": "Refresh token from your approved app's OAuth consent flow. Leave the password field empty. Reddit applies its own limits.",
       "required": false,
       "sensitive": true
+    },
+    "enable_write_tools": {
+      "type": "boolean",
+      "title": "Enable posting tools",
+      "description": "Adds create_post, add_comment, and subreddit_rules over stdio. Requires client credentials plus a refresh token or username/password, with identity/read/submit/flair scopes. Off by default. Uses a confirmation prompt when supported; otherwise approval depends on the client before repeating an identical previewed payload.",
+      "required": false,
+      "default": false
     }
   }
 }

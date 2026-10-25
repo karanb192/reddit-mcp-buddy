@@ -867,6 +867,49 @@ assert_contains "Stdio: returns tool list" "$STDIO_RESULT" '"browse_subreddit"'
 assert_contains "Stdio: returns all 5 tools" "$STDIO_RESULT" '"reddit_explain"'
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 7: LIVE WRITE TESTS (opt-in, never in PR CI)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# The ONLY tests that write to Reddit. They post to a private sandbox
+# subreddit owned by the test account, verify via fresh reads, comment on the
+# created post, then attempt cleanup in finally and verify deletion. The sandbox
+# must be private and moderated by the acting user. No profile posts are made. Three gates must ALL hold or the section
+# self-skips loudly, so the PR workflow (which never sets RUN_WRITE_TESTS)
+# and dev machines with credentials stay write-free by default:
+#   1. RUN_WRITE_TESTS=1
+#   2. client credentials plus a refresh token or username/password in env
+#   3. REDDIT_TEST_SUBREDDIT naming the private sandbox subreddit
+
+log_section "SECTION 7: Live Write Tests (opt-in)"
+
+log_subsection "7a. Sandbox post / comment / delete round-trip"
+
+if [ "${RUN_WRITE_TESTS:-}" != "1" ]; then
+  skip_test "live write round-trip (post, verify, comment, delete)" "RUN_WRITE_TESTS=1 not set (the default: CI and normal dev runs never write)"
+elif [ "$HAS_CREDS" != "1" ] || { [ -z "${REDDIT_REFRESH_TOKEN:-}" ] && { [ -z "${REDDIT_USERNAME:-}" ] || [ -z "${REDDIT_PASSWORD:-}" ]; }; }; then
+  skip_test "live write round-trip (post, verify, comment, delete)" "client credentials plus REDDIT_REFRESH_TOKEN or REDDIT_USERNAME and REDDIT_PASSWORD are required"
+elif [ -z "${REDDIT_TEST_SUBREDDIT:-}" ]; then
+  skip_test "live write round-trip (post, verify, comment, delete)" "REDDIT_TEST_SUBREDDIT (your private sandbox subreddit) is not set"
+else
+  echo -e "  ${YELLOW}⚠ RUN_WRITE_TESTS=1: writing to the private sandbox r/${REDDIT_TEST_SUBREDDIT} after verifying account identity${NC}"
+
+  # Exercise the real MCP stdio connection, then recover and verify cleanup.
+  WRITE_LIVE_OUTPUT=$(REDDIT_BUDDY_WRITE=true node tests/live-write.mjs --run 2>&1)
+  echo "$WRITE_LIVE_OUTPUT" | sed 's/^/    /'
+  API_CALLS=$((API_CALLS + 12))
+
+  assert_contains "Live: write access proven at startup (env creds + /me probe)" "$WRITE_LIVE_OUTPUT" "LIVE_WRITE_READY"
+  assert_contains "Live: subreddit_rules aggregates the sandbox sub" "$WRITE_LIVE_OUTPUT" "LIVE_RULES_OK"
+  assert_contains "Live: declining MCP elicitation creates no post" "$WRITE_LIVE_OUTPUT" "LIVE_DECLINE_OK"
+  assert_contains "Live: client without elicitation previews without submitting" "$WRITE_LIVE_OUTPUT" "LIVE_PREVIEW_OK"
+  assert_contains "Live: self post created in the sandbox" "$WRITE_LIVE_OUTPUT" "LIVE_POST_OK"
+  assert_contains "Live: created post visible via a fresh read" "$WRITE_LIVE_OUTPUT" "LIVE_POST_VISIBLE"
+  assert_contains "Live: comment added to the created post" "$WRITE_LIVE_OUTPUT" "LIVE_COMMENT_OK"
+  assert_contains "Live: comment and post deleted via /api/del" "$WRITE_LIVE_OUTPUT" "LIVE_CLEANUP_OK"
+  assert_not_contains "Live: no step reported failure" "$WRITE_LIVE_OUTPUT" "LIVE_FAIL"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS
 # ═══════════════════════════════════════════════════════════════════════════════
 

@@ -146,6 +146,29 @@ export class CacheManager {
   }
 
   /**
+   * Delete every entry whose key starts with the given prefix and return the
+   * number of entries removed. Used for write-through invalidation: after a
+   * Reddit write, the affected listings would otherwise keep serving a
+   * pre-write snapshot for up to a full TTL.
+   *
+   * NOTE: createKey() lowercases and sanitizes key parts, so callers must
+   * build the prefix through the same normalization (e.g.
+   * CacheManager.createKey('subreddit', name) + ':'), or the prefix will
+   * never match the stored keys.
+   */
+  deleteByPrefix(prefix: string): number {
+    let removed = 0;
+    // Snapshot keys first: delete() mutates the map we would be iterating
+    for (const key of Array.from(this.cache.keys())) {
+      if (key.startsWith(prefix)) {
+        this.delete(key); // delete() maintains sizeUsed
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /**
    * Clear all cache
    */
   clear(): void {
