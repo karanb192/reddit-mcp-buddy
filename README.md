@@ -351,6 +351,26 @@ npx -y reddit-mcp-buddy --auth
 
 This will prompt you for Reddit app credentials and save them locally. **Note: This does NOT work with Claude Desktop** - use environment variables in your Claude config instead.
 
+### Private sandbox posting test
+
+Build the checkout, then print the proposed test without making any requests:
+
+```bash
+npm run build
+REDDIT_TEST_SUBREDDIT=your_private_sub node tests/live-write.mjs
+```
+
+The live run requires an approved script app, all four `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, and `REDDIT_PASSWORD` values in the local environment, and a private subreddit moderated by that user. Keep credentials outside the repository. On Node versions supporting `--env-file`, a local environment file can supply them:
+
+```bash
+RUN_WRITE_TESTS=1 REDDIT_TEST_SUBREDDIT=your_private_sub \
+  node --env-file=/path/to/private.env tests/live-write.mjs --run
+```
+
+This command performs real writes. It starts actual stdio MCP connections, declines one post request, accepts one test post, and tests comment preview followed by an identical submission from a client without elicitation. The harness supplies the confirmation responses automatically; running it authorizes these test actions. It creates one post and one comment, verifies their content, then attempts deletion of both even after a failure.
+
+The unique marker and any cleanup failures are printed for manual inspection. Lost responses trigger a search of the test user's newest posts and comments; an unresolved outcome or unverified deletion fails the run. Cleanup cannot be guaranteed if the process is killed or Reddit is unavailable. Ordinary unit tests use an offline API fixture, and normal integration runs skip posting unless explicitly enabled.
+
 ### Testing with HTTP Mode
 
 To test the server directly in your terminal:

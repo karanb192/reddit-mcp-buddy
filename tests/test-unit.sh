@@ -2268,6 +2268,7 @@ echo "  $WRITECOV_RESULT" | head -1
 assert "write-unit.mjs: every assert passes (100% coverage floor enforced by npm run test:coverage)" "echo \"\$WRITECOV_RESULT\" | grep -q '^WRITE-UNIT: pass'"
 
 assert "live test cleanup: success, failure, recovery, deletion checks, and private-only gate" "node tests/live-cleanup-unit.mjs"
+assert "sandbox harness: real MCP stdio confirmation and fallback with an offline API" "node tests/live-stdio-unit.mjs"
 
 
 # --------------------------------------------------------------------------

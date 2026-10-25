@@ -1,32 +1,32 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-
-const source = readFileSync(new URL('./test-integration.sh', import.meta.url), 'utf8');
-const match = source.match(/WRITE_LIVE_OUTPUT=\$\(REDDIT_BUDDY_WRITE=true node --input-type=module -e '\n([\s\S]*?)\n  ' 2>&1\)/);
-assert.ok(match, 'live test driver must be present');
-const body = match[1].replace(/^    import .*;\n/gm, '');
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-const driver = new AsyncFunction('createSharedServices', 'randomUUID', 'process', 'console', 'setTimeout', body);
+import { runLiveWrite } from './live-write.mjs';
 
 async function scenario(mode) {
   const items = new Map();
   const deleted = [];
   const logs = [];
-  const state = { env: { REDDIT_TEST_SUBREDDIT: 'private_test' }, exitCode: 0 };
+  const state = { exitCode: 0 };
   let writes = 0;
   let destroyed = false;
+  let closed = 0;
+  let connections = 0;
   const api = {
     async getSubredditAboutFull() {
-      return { subreddit_type: mode === 'public' ? 'public' : 'private', user_is_moderator: true };
+      return { subreddit_type: mode === 'public' ? 'public' : 'private', user_is_moderator: mode !== 'non-moderator' };
     },
-    async getPostInfoFresh() { return items.get('t3_p1'); },
+    async getPostInfoFresh() {
+      if (mode === 'post-read-failure') throw new Error('verification read failed');
+      return items.get('t3_p1');
+    },
     async get(path) {
       if (path.startsWith('/api/info')) {
         const id = new URL('https://example.com' + path).searchParams.get('id');
+        if (mode === 'comment-read-failure' && id === 't1_c1' && !deleted.includes(id)) throw new Error('verification read failed');
         const item = items.get(id);
         return { data: { children: item ? [{ data: item }] : [] } };
       }
       const type = path.includes('/comments.json') ? 't1_' : 't3_';
+      if (mode === 'post-read-failure' || mode === 'comment-read-failure') return { data: { children: [] } };
       return { data: { children: [...items].filter(([id]) => id.startsWith(type)).map(([, data]) => ({ data })) } };
     },
     async postForm(endpoint, form) {
@@ -37,26 +37,45 @@ async function scenario(mode) {
       if (mode !== 'unverified-delete') items.delete(id);
     },
   };
-  const tools = {
-    api,
-    async subredditRules() { return { untrusted_content_note: 'reference only' }; },
-    async createPost(params) {
-      assert.equal(params.subreddit, 'private_test');
-      writes++;
-      if (mode === 'post-not-found') throw new Error('request failed');
-      items.set('t3_p1', { id: 'p1', title: params.title, subreddit: params.subreddit, author: 'test_user' });
-      if (mode === 'ambiguous-post') throw new Error('response lost');
-      return { post_id: 'p1', status: 'live' };
-    },
-    async addComment(params) {
-      if (mode === 'comment-failure') throw new Error('comment rejected');
-      items.set('t1_c1', { id: 'c1', body: params.text, link_id: 't3_' + params.post_id, subreddit: 'private_test', author: 'test_user' });
-      if (mode === 'ambiguous-comment') throw new Error('response lost');
-      return { comment_id: 'c1' };
-    },
+  const connect = async onConfirm => {
+    connections++;
+    let previewed = false;
+    return {
+      async close() { closed++; },
+      async call(name, params) {
+        if (name === 'subreddit_rules') return { untrusted_content_note: 'reference only' };
+        if (name === 'create_post') {
+          assert.equal(params.subreddit, 'private_test');
+          const decision = await onConfirm({ params: { message: 'Post to r/private_test: ' + params.title,
+            requestedSchema: { properties: { confirm: { type: 'boolean' } } } } });
+          if (decision.action === 'decline' && mode !== 'decline-write') throw new Error('User declined the confirmation; nothing was posted.');
+          writes++;
+          if (mode === 'post-not-found') throw new Error('request failed');
+          items.set('t3_p1', { id: 'p1', title: params.title, selftext: params.body_markdown, subreddit: params.subreddit, author: 'test_user' });
+          if (mode === 'decline-write') throw new Error('User declined the confirmation; nothing was posted.');
+          if (mode === 'ambiguous-post') throw new Error('response lost');
+          return { post_id: 'p1', status: 'live' };
+        }
+        assert.equal(name, 'add_comment');
+        assert.equal(onConfirm, undefined, 'fallback client must not advertise elicitation');
+        if (!previewed) {
+          previewed = true;
+          if (mode !== 'preview-write') return { status: 'confirmation_required', would_comment: { target: 't3_' + params.post_id, preview: params.text } };
+        }
+        if (mode === 'comment-failure') throw new Error('comment rejected');
+        items.set('t1_c1', { id: 'c1', body: params.text, link_id: 't3_' + params.post_id, subreddit: 'private_test', author: 'test_user' });
+        if (mode === 'ambiguous-comment') throw new Error('response lost');
+        if (mode === 'preview-write') return { status: 'confirmation_required', would_comment: { target: 't3_' + params.post_id, preview: params.text } };
+        return { comment_id: 'c1' };
+      },
+    };
   };
-  await driver(async () => ({ writeStatus: { enabled: true }, actingUser: 'test_user', writeTools: tools, cacheManager: { destroy() { destroyed = true; } } }),
-    () => 'unique-test-marker', state, { log: text => logs.push(text) }, callback => callback());
+  const passed = await runLiveWrite({
+    shared: { writeStatus: { enabled: true }, actingUser: 'test_user', writeTools: { api }, cacheManager: { destroy() { destroyed = true; } } },
+    sub: 'r/private_test', marker: 'unique-test-marker', connect, sleep: async () => {}, log: text => logs.push(text),
+  });
+  state.exitCode = passed ? 0 : 1;
+  assert.equal(closed, connections, 'all MCP transports must close');
   assert.ok(destroyed, 'cache timers must be stopped');
   assert.ok(logs.some(line => line.startsWith('LIVE_MARKER ')), 'print recovery marker before any write');
   return { deleted, logs, state, writes, items };
@@ -99,4 +118,18 @@ const publicSub = await scenario('public');
 assert.equal(publicSub.writes, 0);
 assert.deepEqual(publicSub.deleted, []);
 assert.equal(publicSub.state.exitCode, 1);
-console.log('LIVE-CLEANUP: pass (8 scenarios)');
+for (const mode of ['decline-write', 'preview-write']) {
+  const result = await scenario(mode);
+  assert.equal(result.state.exitCode, 1);
+  assert.equal(result.items.size, 0, 'unexpected writes must also be cleaned up');
+}
+const nonModerator = await scenario('non-moderator');
+assert.equal(nonModerator.writes, 0);
+assert.equal(nonModerator.state.exitCode, 1);
+for (const mode of ['post-read-failure', 'comment-read-failure']) {
+  const result = await scenario(mode);
+  assert.equal(result.state.exitCode, 1);
+  assert.equal(result.items.size, 0, 'known IDs must be deleted even before they appear in user listings');
+  assert.deepEqual(result.deleted, mode === 'post-read-failure' ? ['t3_p1'] : ['t1_c1', 't3_p1']);
+}
+console.log('LIVE-CLEANUP: pass (13 scenarios)');

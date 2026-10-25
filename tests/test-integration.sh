@@ -893,113 +893,15 @@ elif [ -z "${REDDIT_TEST_SUBREDDIT:-}" ]; then
 else
   echo -e "  ${YELLOW}⚠ RUN_WRITE_TESTS=1: writing to the private sandbox r/${REDDIT_TEST_SUBREDDIT} as u/${REDDIT_USERNAME}${NC}"
 
-  # The driver exercises the real write stack (createSharedServices proves the
-  # startup gating incl. the /me probe) and prints LIVE_* markers the asserts
-  # below match on. Cleanup failures leave explicit IDs for manual inspection.
-  # The 16 s sleeps respect the WriteGate's non-bypassable 15 s interval.
-  WRITE_LIVE_OUTPUT=$(REDDIT_BUDDY_WRITE=true node --input-type=module -e '
-    import { createSharedServices } from "./dist/mcp-server.js";
-    import { randomUUID } from "node:crypto";
-
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-    const shared = await createSharedServices();
-    const sub = process.env.REDDIT_TEST_SUBREDDIT.trim().replace(/^\/?r\//i, "");
-    const marker = "reddit-mcp-buddy test " + randomUUID();
-    console.log("LIVE_MARKER " + marker);
-    const commentText = "Integration test comment: " + marker;
-    const created = new Set();
-    const attempted = { submitted: false, comments: false };
-    let api;
-    let postId;
-    let commentId;
-    let cleanupFailed = false;
-
-    try {
-      if (!shared.writeStatus.enabled || !shared.writeTools) throw new Error("write access not enabled");
-      console.log("LIVE_WRITE_READY acting_user=" + shared.actingUser);
-      const tools = shared.writeTools;
-      api = tools["api"];
-      const about = await api.getSubredditAboutFull(sub);
-      if (about?.subreddit_type !== "private" || about?.user_is_moderator !== true) {
-        throw new Error("sandbox must be private and the acting user must be a moderator");
-      }
-      const rules = await tools.subredditRules({ subreddit: sub });
-      if (!rules.untrusted_content_note) throw new Error("rules response missing reference-only note");
-      console.log("LIVE_RULES_OK");
-      const confirm = { elicit: async () => "confirmed" };
-
-      attempted.submitted = true;
-      const post = await tools.createPost({
-        subreddit: sub, title: marker,
-        body_markdown: "Private integration test. Cleanup is attempted even if a later step fails.",
-      }, confirm);
-      if (!post?.post_id) throw new Error("create_post returned no post_id");
-      postId = post.post_id;
-      created.add("t3_" + postId);
-      console.log("LIVE_POST_OK id=" + postId + " status=" + post.status);
-      const fresh = await api.getPostInfoFresh(postId);
-      if (fresh?.title !== marker) throw new Error("created post not visible");
-      console.log("LIVE_POST_VISIBLE");
-
-      await sleep(16000);
-      attempted.comments = true;
-      const comment = await tools.addComment({ post_id: postId, text: commentText }, confirm);
-      if (!comment?.comment_id) throw new Error("add_comment returned no comment_id");
-      commentId = comment.comment_id;
-      created.add("t1_" + commentId);
-      console.log("LIVE_COMMENT_OK id=" + commentId);
-    } catch (error) {
-      console.log("LIVE_FAIL " + error.message);
-      process.exitCode = 1;
-    } finally {
-      if (api) {
-        for (const type of ["submitted", "comments"]) {
-          if (!attempted[type] || (type === "submitted" ? postId : commentId)) continue;
-          try {
-            const listing = await api["get"]("/user/" + encodeURIComponent(shared.actingUser) + "/" + type + ".json?sort=new&limit=100");
-            let found = false;
-            for (const child of listing?.data?.children ?? []) {
-              const item = child.data;
-              const matches = type === "submitted"
-                ? item.title === marker
-                : item.body === commentText && item.link_id === "t3_" + postId;
-              if (matches && item.subreddit?.toLowerCase() === sub.toLowerCase()) {
-                created.add((type === "submitted" ? "t3_" : "t1_") + item.id);
-                found = true;
-              }
-            }
-            if (!found) throw new Error("write outcome unknown; manually check marker " + marker);
-          } catch (error) {
-            console.log("LIVE_FAIL recovery: " + error.message);
-            cleanupFailed = true;
-          }
-        }
-
-        for (const id of [...created].sort((a, b) => a.localeCompare(b))) {
-          try {
-            await api["postForm"]("/api/del", new URLSearchParams({ api_type: "json", id }));
-            const info = await api["get"]("/api/info.json?id=" + encodeURIComponent(id));
-            const item = info?.data?.children?.[0]?.data;
-            if (item && item.author !== "[deleted]" && item.body !== "[deleted]" && item.removed_by_category !== "deleted") {
-              throw new Error("deletion not yet verified for " + id);
-            }
-            console.log("LIVE_DELETED " + id);
-          } catch (error) {
-            console.log("LIVE_FAIL cleanup " + id + ": " + error.message);
-            cleanupFailed = true;
-          }
-        }
-      }
-      shared.cacheManager.destroy();
-      if (cleanupFailed) process.exitCode = 1;
-      if (!cleanupFailed && postId && commentId) console.log("LIVE_CLEANUP_OK");
-    }
-  ' 2>&1)
+  # Exercise the real MCP stdio connection, then recover and verify cleanup.
+  WRITE_LIVE_OUTPUT=$(REDDIT_BUDDY_WRITE=true node tests/live-write.mjs --run 2>&1)
   echo "$WRITE_LIVE_OUTPUT" | sed 's/^/    /'
   API_CALLS=$((API_CALLS + 12))
 
   assert_contains "Live: write access proven at startup (env creds + /me probe)" "$WRITE_LIVE_OUTPUT" "LIVE_WRITE_READY"
   assert_contains "Live: subreddit_rules aggregates the sandbox sub" "$WRITE_LIVE_OUTPUT" "LIVE_RULES_OK"
+  assert_contains "Live: declining MCP elicitation creates no post" "$WRITE_LIVE_OUTPUT" "LIVE_DECLINE_OK"
+  assert_contains "Live: client without elicitation previews without submitting" "$WRITE_LIVE_OUTPUT" "LIVE_PREVIEW_OK"
   assert_contains "Live: self post created in the sandbox" "$WRITE_LIVE_OUTPUT" "LIVE_POST_OK"
   assert_contains "Live: created post visible via a fresh read" "$WRITE_LIVE_OUTPUT" "LIVE_POST_VISIBLE"
   assert_contains "Live: comment added to the created post" "$WRITE_LIVE_OUTPUT" "LIVE_COMMENT_OK"
