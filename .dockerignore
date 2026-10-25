@@ -1,0 +1,11 @@
+.git
+.env*
+.claude
+.gstack
+node_modules
+dist
+coverage
+*.log
+*.mcpb
+CLAUDE.md
+AGENTS.md
