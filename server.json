@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.karanb192/reddit-mcp-buddy",
   "version": "1.2.0",
-  "description": "Reddit for AI assistants: browse, search, analyze; opt-in posting with server-side safety rails.",
+  "description": "Browse Reddit RSS; approved API access for search, analysis, and optional posting.",
   "author": {
     "name": "Karan Bansal",
     "email": "karanb192@gmail.com",
@@ -66,7 +66,7 @@
     },
     {
       "name": "create_post",
-      "description": "Submit a text or link post to one subreddit, with mechanical rule preflight, a validate_only dry run, and a user confirmation before every real submit (opt-in via REDDIT_BUDDY_WRITE, stdio only)."
+      "description": "Submit a text or link post with mechanical preflight and validate_only dry runs. Opt-in via REDDIT_BUDDY_WRITE, stdio only. Confirmation uses elicitation when supported; otherwise approval depends on the client before repeating the previewed payload."
     },
     {
       "name": "add_comment",
