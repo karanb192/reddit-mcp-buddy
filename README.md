@@ -495,6 +495,35 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 
 > **HTTP mode has no authentication.** It binds to localhost so only your machine can reach it, and rejects Host headers outside the loopback set. Setting `REDDIT_BUDDY_HOST=0.0.0.0` exposes it to your whole network - only do that on a trusted network (e.g. inside Docker, which sets it deliberately). On a non-loopback bind the Host check is off by default, since clients legitimately arrive with a container IP or service name; set `REDDIT_BUDDY_ALLOWED_HOSTS` to restrict it. Browser requests are rejected unless their origin is listed in `REDDIT_BUDDY_ALLOWED_ORIGINS`; non-browser clients like Postman are unaffected.
 
+### HTTP and HTTPS Proxies
+
+On Node 22.21.0+ in the 22.x line, or Node 24 and newer, enable Node's built-in proxy support before starting the server. The project's Node 26 Docker image supports this. Check `node --version` first: unsupported versions can ignore these settings and connect directly. Node currently marks this feature as under active development.
+
+```json
+{
+  "mcpServers": {
+    "reddit": {
+      "command": "npx",
+      "args": ["-y", "reddit-mcp-buddy"],
+      "env": {
+        "NODE_USE_ENV_PROXY": "1",
+        "HTTP_PROXY": "http://proxy.example.com:8080",
+        "HTTPS_PROXY": "http://proxy.example.com:8080",
+        "NO_PROXY": "localhost,127.0.0.1"
+      }
+    }
+  }
+}
+```
+
+`HTTP_PROXY` routes HTTP requests; `HTTPS_PROXY` routes HTTPS requests, including Reddit API and RSS calls. `NO_PROXY` excludes matching hosts. Export these variables in your shell for CLI use, or pass them with Docker's `-e` options. Set them in the process environment before startup; the server does not load a project `.env` file automatically.
+
+Inside Docker, `localhost` refers to the container. On Docker Desktop, use `host.docker.internal` to reach a proxy running on the host.
+
+Proxy authentication can be included in the proxy URL as `http://username:password@proxy.example.com:8080`. Treat that value as a credential and redact it from shared logs and configuration. For a network that uses a private certificate authority, use `NODE_EXTRA_CA_CERTS` with your organization's PEM certificate file instead of disabling TLS verification.
+
+See [Node's proxy and certificate configuration guide](https://nodejs.org/learn/http/enterprise-network-configuration). Proxy support routes network traffic; it does not grant Reddit API approval or bypass Reddit's access rules.
+
 ## Technical Details
 
 ### Smart Caching System
