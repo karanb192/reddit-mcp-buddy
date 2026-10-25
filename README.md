@@ -461,6 +461,7 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 - Local caps: 10 requests/minute without auth, 60 with app credentials, and 100 with full authentication
 - Reddit applies separate API and RSS limits; the server retries transient failures, but sustained throttling can still fail
 - Reduce request frequency and respect Reddit's rate-limit responses
+- If an error says `Retry in Ns`, wait that long before retrying. The server returns long upstream waits immediately instead of sleeping through the client's request timeout.
 
 **"Subreddit not found"**
 - Check spelling (case-insensitive)
