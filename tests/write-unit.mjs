@@ -469,6 +469,7 @@ const confirm = { elicit: async () => 'confirmed' };
     && (await throwsMsg(() => parseCommentUrl('redd.it/1abc2'))).includes('redd.it'));
   t('C32 non-Reddit URLs rejected with the expected shape', (await throwsMsg(() => parseCommentUrl('https://example.com/comments/1abc2'))).includes('Unrecognized'));
   t('C33 malformed reddit URL rejected', (await throwsMsg(() => parseCommentUrl('https://reddit.com/r/test/notcomments/1abc2'))).includes('Unrecognized'));
+  t('C33b lookalike Reddit hosts rejected', (await throwsMsg(() => parseCommentUrl('https://notreddit.com/comments/1abc2'))).includes('Unrecognized'));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -588,7 +589,7 @@ const confirm = { elicit: async () => 'confirmed' };
   // validate_only mechanics
   t('E25 validate_only made ZERO write-path calls', submitCalls === 0 && commentCalls === 0);
   t('E26 dry-run response lists checked and not_checked and says nothing was posted', okTitle.note.includes('Nothing was posted') && okTitle.checked.length > 0);
-  const vkey = gate.makePostKey('titlerules', 'self', '[Tag] fine', '');
+  const vkey = gate.makeConfirmationKey(JSON.stringify({ subreddit: 'titlerules', kind: 'self', title: '[Tag] fine' }));
   t('E27 validate_only recorded a validate pass (arms the fallback confirm)', gate.hasRecentValidatePass(vkey) === true);
 }
 
@@ -699,6 +700,20 @@ const confirm = { elicit: async () => 'confirmed' };
   const afterValidate = await tools.createPost({ subreddit: 'anysub', title: 'Prevalidated', body_markdown: 'pv' });
   t('F22 a validate_only pass arms the no-elicit submit directly', afterValidate.post_id === 'p1');
 
+  tick(3600_000);
+  const pending = { subreddit: 'anysub', title: 'Complete payload', body_markdown: 'first\nsecond', nsfw: false, spoiler: false, flair_id: 'f1', flair_text: 'old', resubmit: false, send_replies: true };
+  await tools.createPost({ ...pending, validate_only: true });
+  const writesBeforeChanges = submitCalls;
+  for (const change of [{ nsfw: true }, { spoiler: true }, { flair_id: 'f2' }, { flair_text: 'new' }, { resubmit: true }, { send_replies: false }, { body_markdown: 'first second' }]) {
+    const changed = await tools.createPost({ ...pending, ...change });
+    t(`F25 changed payload needs another preview: ${Object.keys(change)[0]}`, changed.status === 'confirmation_required' && submitCalls === writesBeforeChanges);
+  }
+  const shown = await tools.createPost({ ...pending, title: 'Options preview' });
+  t('F26 fallback preview exposes every option', shown.would_post.options.nsfw === false && shown.would_post.options.spoiler === false && shown.would_post.options.flair_id === 'f1' && shown.would_post.options.flair_text === 'old' && shown.would_post.options.resubmit === false && shown.would_post.options.send_replies === true);
+  const identical = await tools.createPost(pending);
+  t('F27 unchanged validated payload submits once', identical.post_id === 'p1' && submitCalls === writesBeforeChanges + 1);
+  t('F28 elicitation includes options and full length', elicitMsg.includes('"nsfw":true') && elicitMsg.includes('"spoiler":false') && elicitMsg.includes('Full content length:'));
+
   // Default sleep and default verify delay: a real (1 ms) timer-based verify
   {
     let ts2 = now + 10 * 60_000;
@@ -774,6 +789,12 @@ const confirm = { elicit: async () => 'confirmed' };
   await tools.addComment({ post_id: 'p1', text: 'first of two' }, confirm);
   const tooFast = await throwsMsg(() => tools.addComment({ post_id: 'p1', text: 'second too soon' }, confirm));
   t('G12 min interval applies to comments too', tooFast.includes('interval'));
+
+  tick();
+  const beforeWhitespace = commentCalls;
+  await tools.addComment({ post_id: 'p1', text: 'code\n    indented' });
+  const changedWhitespace = await tools.addComment({ post_id: 'p1', text: 'code indented' });
+  t('G12b markdown whitespace changes require another preview', changedWhitespace.status === 'confirmation_required' && commentCalls === beforeWhitespace);
 
   // Two-call confirm fallback for comments (no validate_only exists for them)
   tick();

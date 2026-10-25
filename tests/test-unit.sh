@@ -1636,15 +1636,19 @@ WRITEAPI_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
 
   // t4: 401 is surfaced without a resubmit (token refresh happens next call)
   let calls4 = 0;
+  let tokens4 = 0;
   globalThis.fetch = async (url) => {
     const u = String(url);
-    if (u.includes("access_token")) return token();
+    if (u.includes("access_token")) { tokens4++; return token(); }
     if (u.endsWith("/api/submit")) { calls4++; return new Response("", { status: 401 }); }
     throw new Error("unexpected");
   };
   let err4 = "";
-  try { await (await mkApi()).submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err4 = e.message; }
-  const t4 = calls4 === 1 && err4.includes("401");
+  const api4 = await mkApi();
+  try { await api4.submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch (e) { err4 = e.message; }
+  const oneAttempt4 = calls4 === 1 && tokens4 === 1;
+  try { await api4.submitPost({ subreddit: "test", kind: "self", title: "x" }); } catch {}
+  const t4 = oneAttempt4 && calls4 === 2 && tokens4 === 2 && err4.includes("401");
 
   // t5: error triples inside an HTTP 200 become a mapped WriteError
   globalThis.fetch = async (url) => String(url).includes("access_token") ? token() : json({ json: { errors: [["RATELIMIT", "try again in 7 minutes.", "ratelimit"]] } });

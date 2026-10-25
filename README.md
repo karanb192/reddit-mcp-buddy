@@ -225,11 +225,11 @@ Reddit MCP Buddy supports three authentication levels, each with different rate 
 
 Since v1.2.0 the server can post for you. Three tools, all opt-in:
 
-- **`create_post`** - Submit a text or link post to one subreddit. Runs the sub's mechanical rules first (title limits, flair required, link vs text allowed), supports `validate_only: true` as a dry run that posts nothing, and asks you before every real submit.
-- **`add_comment`** - Comment on a post or reply to a specific comment (by id or URL). Same confirmation before every submit.
+- **`create_post`** - Submit a text or link post to one subreddit. Checks mechanical rules (title limits, flair required, link vs text allowed) and supports `validate_only: true` as a dry run. Confirmation depends on the client's capabilities as described below.
+- **`add_comment`** - Comment on a post or reply to a specific comment (by id or URL), with the same confirmation flow.
 - **`subreddit_rules`** - Read-only. Fetches a sub's rules, posting requirements, capability flags, and flair choices in one cached call, so drafts fit the sub before anything is submitted.
 
-The intended workflow: `subreddit_rules` first, then `create_post` with `validate_only: true`, then the real `create_post`. One confirmation replaces the whole draft-then-copy-paste dance.
+The intended workflow: `subreddit_rules` first, then `create_post` with `validate_only: true`, review the full draft and options with the user, then submit the identical payload.
 
 ### Enabling posting
 
@@ -259,11 +259,11 @@ All four credentials must come from environment variables (or the extension's co
 
 ### The safety model, in plain words
 
-Posting as you is the highest-trust thing an MCP server can do, so the guardrails live in the server, not in the client's goodwill:
+Posting uses your account. The server enforces registration, rate limits, and duplicate checks; human approval also depends on the client:
 
 - **Off by default.** Without `REDDIT_BUDDY_WRITE`, the write tools do not exist: read-only installs see exactly the same 5 tools as before, and pay zero extra context.
 - **stdio only.** The HTTP transport has no authentication, so write tools refuse to register there. No process on your machine or network can turn the HTTP endpoint into a posting proxy.
-- **You confirm every submit.** Clients that support [MCP elicitation](https://modelcontextprotocol.io/specification/latest) get a server-side confirmation prompt showing what will be posted, where (subreddit or target post/comment), and as which account. Clients that cannot prompt get a preview response instead, and the identical call must be repeated within 15 minutes to submit (a `validate_only` run of the same content also arms it).
+- **Confirmation depends on the client.** Clients supporting [MCP elicitation](https://modelcontextprotocol.io/specification/latest) get a confirmation prompt with the target, account, content preview, full content length, and post options. The prompt requires an explicit acceptance. Previews can be truncated, so review the full draft in your client first. Without elicitation, the server requires a preview or successful dry run followed by the identical payload within 15 minutes. It cannot verify that a human approved that repeat: approval depends on the client's tool prompt and the model following instructions. Only enable posting in a client whose approval behavior you trust.
 - **Hourly caps you cannot raise.** At most 5 posts/hour, 30 comments/hour, and 15 seconds between writes, enforced in the server. Environment variables can tighten these, never loosen them. Honest limit: the caps live in the server process (a restart resets the hour, and a fork of this open-source code can remove them). They exist to make casual abuse pointless, not to stop a determined operator.
 - **Duplicate suppression.** Retrying an identical submit within 15 minutes returns the original post instead of posting twice, including the same content re-drafted for the same sub. Posting the same content to a different subreddit is allowed, with a warning naming the earlier post.
 - **Verified after submit.** Reddit happily returns "success" for posts AutoModerator removes seconds later. The server re-checks after submitting and reports `status: "filtered"` with a warning when that happens, instead of telling you it went live.
@@ -301,7 +301,7 @@ Reddit MCP Buddy is designed with privacy and transparency in mind. Here's how y
 - **Local Processing**: All data processing happens locally on your machine
 
 ### Security Notes
-- **Read-Only by Default**: The server never posts, comments, or modifies Reddit content unless you explicitly enable the [posting tools](#posting-v120), and even then every submit goes through a confirmation gate
+- **Read-Only by Default**: Posting requires explicit opt-in. Review the [client-dependent confirmation flow](#the-safety-model-in-plain-words) before enabling it.
 - **Credential Safety**:
   - OAuth tokens are refreshed automatically and kept in memory; only `--auth` CLI setups also cache the token in `~/.reddit-mcp-buddy/auth.json` (file mode 600)
   - Client secrets are treated as sensitive and never logged

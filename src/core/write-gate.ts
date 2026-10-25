@@ -7,7 +7,7 @@
  * mints a fresh Server per request, and per-request state would reset the
  * caps and idempotency records to zero on every call.
  *
- * The rate floor is deliberately non-bypassable. This is a public package;
+ * The rate floor is enforced within this process. This is a public package;
  * without a floor, create_post plus add_comment over an arbitrary subreddit
  * is a spam surface for any operator (Reddit's Responsible Builder Policy
  * names exactly this). Environment variables can only TIGHTEN the limits,
@@ -181,6 +181,10 @@ export class WriteGate {
   /** Idempotency key for a comment submit. */
   makeCommentKey(thingId: string, text: string): string {
     return this.hashKey('comment', thingId.trim().toLowerCase(), this.normText(text));
+  }
+
+  makeConfirmationKey(...parts: string[]): string {
+    return this.hashKey('confirmation', ...parts);
   }
 
   /** Stored result for a recent identical submit, or null. */

@@ -2,7 +2,7 @@
  * Write tools (v1.2.0): create_post, add_comment, subreddit_rules.
  *
  * Everything here assumes the server-owned safety model: the WriteGate's rate
- * floor and idempotency records are non-bypassable, every real submit passes a
+ * floor and idempotency records are per-process, every real submit passes a
  * confirmation gate (MCP elicitation, or an enforced dry-run fallback for
  * clients that cannot elicit), and no error path ever echoes raw Reddit
  * response bodies. Registration gating lives in mcp-server.ts; this module
@@ -183,7 +183,7 @@ export function parseCommentUrl(url: string): CommentTarget {
   }
 
   const m = cleanUrl.match(
-    /(?:https?:\/\/)?(?:[a-z0-9-]+\.)*reddit\.com\/(?:(?:r\/([A-Za-z0-9_]{2,21})|user\/([A-Za-z0-9_-]{3,20}))\/)?comments\/([A-Za-z0-9]{2,13})(?:\/[^/]*(?:\/([A-Za-z0-9]{2,13}))?)?\/?$/i
+    /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*reddit\.com\/(?:(?:r\/([A-Za-z0-9_]{2,21})|user\/([A-Za-z0-9_-]{3,20}))\/)?comments\/([A-Za-z0-9]{2,13})(?:\/[^/]*(?:\/([A-Za-z0-9]{2,13}))?)?\/?$/i
   );
   if (!m) {
     throw new Error('Unrecognized Reddit URL. Expected .../r/<sub>/comments/<postid>[/<slug>[/<commentid>]]. Pass post_id or comment_id directly if the URL shape is unusual.');
@@ -388,11 +388,29 @@ export class RedditWriteTools {
     const preflight = await this.runPreflight(params, kind);
 
     const key = this.gate.makePostKey(params.subreddit, kind, params.title, bodyOrUrl);
+    const submitParams = {
+      subreddit: params.subreddit,
+      kind,
+      title: params.title,
+      text: kind === 'self' ? params.body_markdown : undefined,
+      url: kind === 'link' ? params.link_url : undefined,
+      flair_id: params.flair_id,
+      flair_text: params.flair_text,
+      resubmit: params.resubmit,
+      nsfw: params.nsfw,
+      spoiler: params.spoiler,
+      send_replies: params.send_replies,
+    };
+    const confirmationKey = this.gate.makeConfirmationKey(JSON.stringify(submitParams));
+    const options = Object.fromEntries(
+      ['flair_id', 'flair_text', 'resubmit', 'nsfw', 'spoiler', 'send_replies']
+        .map(name => [name, submitParams[name as keyof typeof submitParams] ?? '(unspecified)'])
+    );
 
     // 3. Dry run: record the pass (it arms the no-elicitation confirmation
     // fallback) and stop. Zero Reddit write-path calls happened.
     if (params.validate_only) {
-      this.gate.recordValidatePass(key);
+      this.gate.recordValidatePass(confirmationKey);
       return {
         valid: true,
         checked: preflight.checked,
@@ -443,14 +461,14 @@ export class RedditWriteTools {
     const preview = this.capText(bodyOrUrl, PREVIEW_CAP);
     if (confirmer.elicit) {
       const decision = await confirmer.elicit(
-        `Post to r/${params.subreddit} as u/${this.actingUser}?\nTitle: ${params.title}\n${kind === 'link' ? 'Link' : 'Body preview'}: ${preview || '(empty)'}`
+        `Post to r/${params.subreddit} as u/${this.actingUser}?\nTitle: ${params.title}\n${kind === 'link' ? 'Link' : 'Body preview'}: ${preview || '(empty)'}\nFull content length: ${bodyOrUrl.length} characters.\nOptions: ${JSON.stringify(options)}`
       );
       if (decision !== 'confirmed') {
         throw new Error('User declined the confirmation; nothing was posted.');
       }
-    } else if (!this.gate.hasRecentValidatePass(key)) {
+    } else if (!this.gate.hasRecentValidatePass(confirmationKey)) {
       // Arm the pending intent: an IDENTICAL call within the window proceeds.
-      this.gate.recordValidatePass(key);
+      this.gate.recordValidatePass(confirmationKey);
       return {
         status: 'confirmation_required',
         acting_user: this.actingUser,
@@ -459,25 +477,15 @@ export class RedditWriteTools {
           kind,
           title: params.title,
           preview,
+          content_length: bodyOrUrl.length,
+          options,
         },
         note: 'This client cannot show a confirmation prompt (no MCP elicitation), so nothing was posted. Confirm with the user, then re-issue this exact create_post call within 15 minutes to submit. A validate_only run of the same content also arms this confirmation.',
       };
     }
 
     // 7. Submit (the transport never auto-retries after send)
-    const result = await this.api.submitPost({
-      subreddit: params.subreddit,
-      kind,
-      title: params.title,
-      text: kind === 'self' ? params.body_markdown : undefined,
-      url: kind === 'link' ? params.link_url : undefined,
-      flair_id: params.flair_id,
-      flair_text: params.flair_text,
-      resubmit: params.resubmit,
-      nsfw: params.nsfw,
-      spoiler: params.spoiler,
-      send_replies: params.send_replies,
-    });
+    const result = await this.api.submitPost(submitParams);
 
     // 8. Record in the gate: rate slot, idempotency replay, content guard
     this.gate.recordWrite('post', { subreddit: params.subreddit, actingUser: this.actingUser });
@@ -534,6 +542,7 @@ export class RedditWriteTools {
     // 1. Resolve exactly one target (throws clear errors on ambiguity)
     const target = resolveCommentTarget(params);
     const key = this.gate.makeCommentKey(target.thingId, params.text);
+    const confirmationKey = this.gate.makeConfirmationKey(target.thingId, params.text);
 
     // Steps 2-7 run under the gate's write mutex, for the same reason as
     // createPost: concurrent calls must not race the checks past the records.
@@ -566,19 +575,20 @@ export class RedditWriteTools {
     const preview = this.capText(params.text, PREVIEW_CAP);
     if (confirmer.elicit) {
       const decision = await confirmer.elicit(
-        `Submit a ${targetLabel} as u/${this.actingUser}?\nText preview: ${preview}`
+        `Submit a ${targetLabel} as u/${this.actingUser}?\nText preview: ${preview}\nFull comment length: ${params.text.length} characters.`
       );
       if (decision !== 'confirmed') {
         throw new Error('User declined the confirmation; nothing was posted.');
       }
-    } else if (!this.gate.hasRecentValidatePass(key)) {
-      this.gate.recordValidatePass(key);
+    } else if (!this.gate.hasRecentValidatePass(confirmationKey)) {
+      this.gate.recordValidatePass(confirmationKey);
       return {
         status: 'confirmation_required',
         acting_user: this.actingUser,
         would_comment: {
           target: target.thingId,
           preview,
+          content_length: params.text.length,
         },
         note: 'This client cannot show a confirmation prompt (no MCP elicitation), so nothing was posted. Confirm with the user, then re-issue this exact add_comment call within 15 minutes to submit.',
       };

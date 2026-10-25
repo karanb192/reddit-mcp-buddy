@@ -319,8 +319,8 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
 
 POSTING (write tools enabled, acting as u/${services.actingUser}):
 - Safe workflow: subreddit_rules first, then create_post with validate_only:true, then the real create_post
-- Every real submit requires a user confirmation; never try to work around it
-- A hard hourly write cap and a minimum interval between writes apply; when told to wait, wait` : ''}`,
+- Ask the user before submitting. With MCP elicitation, the server requests confirmation directly. Otherwise, the preview-and-repeat flow relies on you and the client's tool approval; never repeat without the user's permission
+- Per-process hourly write caps and a minimum interval apply; when told to wait, wait` : ''}`,
     }
   );
 
@@ -367,12 +367,12 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
     toolDefinitions.push(
       {
         name: 'create_post',
-        description: 'Submit a text or link post to one subreddit. Mechanical rule checks run first; validate_only:true is a dry run that posts nothing. Every real submit needs a user confirmation.',
+        description: 'Submit a text or link post to one subreddit. Mechanical rules run first; validate_only:true posts nothing. Ask the user before submitting; without elicitation, approval depends on the client.',
         inputSchema: zodSchemaToMCPInputSchema(createPostSchema, 'create_post'),
       },
       {
         name: 'add_comment',
-        description: 'Comment on a post or reply to a comment. Give exactly one target: post_id, comment_id, or url. Every real submit needs a user confirmation.',
+        description: 'Comment on a post or reply to a comment. Give exactly one target: post_id, comment_id, or url. Ask the user before submitting; without elicitation, approval depends on the client.',
         inputSchema: zodSchemaToMCPInputSchema(addCommentSchema, 'add_comment'),
       },
       {
@@ -406,12 +406,12 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
               confirm: {
                 type: 'boolean',
                 title: 'Submit to Reddit?',
-                description: 'true submits exactly what is shown above; false aborts.',
+                description: 'true submits the full content, which may be longer than the preview, with the displayed options; false aborts.',
               },
             },
             required: ['confirm'],
           },
-        });
+        }, { timeout: 300000 });
         // Only an explicit accept with confirm:true proceeds; decline,
         // cancel, and accept-without-confirm all abort.
         return result.action === 'accept' && result.content?.confirm === true

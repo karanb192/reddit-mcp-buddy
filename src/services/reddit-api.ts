@@ -722,6 +722,7 @@ export class RedditAPI {
     clearTimeout(timeoutId);
 
     if (response.status === 401) {
+      this.auth.invalidateAccessToken();
       // Do NOT refresh-and-resubmit: the body was already sent once and a
       // resubmit could double-post. The next call re-mints the token.
       throw new Error(

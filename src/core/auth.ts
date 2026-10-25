@@ -190,6 +190,10 @@ export class AuthManager {
     return this.config;
   }
 
+  invalidateAccessToken(): void {
+    if (this.config) this.config.expiresAt = 0;
+  }
+
   /**
    * Check if authenticated
    */
