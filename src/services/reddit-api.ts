@@ -53,12 +53,33 @@ export class RedditAPI {
   // so a network/IP change heals without a restart.
   private anonJsonBlockedUntil = 0;
   private readonly ANON_JSON_BLOCK_TTL_MS = 15 * 60 * 1000;
+  // Shown by the tools that have no credential-free fallback. Saying
+  // "private or quarantined" here sends the model off trying other
+  // subreddits when the real cause is the logged-out IP block.
+  private readonly ANON_BLOCKED_MESSAGE =
+    'Reddit blocks logged-out API access from this network (HTTP 403). ' +
+    'This tool needs Reddit API credentials (see README -> Authentication); ' +
+    'browse_subreddit still works via RSS.';
 
   constructor(options: RedditAPIOptions) {
     this.auth = options.authManager;
     this.rateLimiter = options.rateLimiter;
     this.cache = options.cacheManager;
     this.timeout = options.timeout ?? 10000; // Increased timeout to 10 seconds
+  }
+
+  private anonBlockedError(): Error {
+    return this.httpError(this.ANON_BLOCKED_MESSAGE, 403);
+  }
+
+  /**
+   * Fail fast when the anonymous .json API is known to be blocked: these
+   * tools have no RSS fallback, so the request can only end in a 403.
+   */
+  private assertAnonJsonAllowed(): void {
+    if (!this.auth.isAuthenticated() && Date.now() < this.anonJsonBlockedUntil) {
+      throw this.anonBlockedError();
+    }
   }
 
   /**
@@ -373,6 +394,7 @@ export class RedditAPI {
     } = {}
   ): Promise<[RedditListing<RedditPost>, RedditListing<RedditComment>]> {
     const { limit = 50, sort = 'best', depth = 3 } = options;
+    this.assertAnonJsonAllowed();
 
     // Extract subreddit and post ID from various formats
     let subreddit: string;
@@ -472,6 +494,7 @@ export class RedditAPI {
     if (cached) {
       return cached;
     }
+    this.assertAnonJsonAllowed();
 
     const params = new URLSearchParams({
       q: query,
@@ -509,6 +532,7 @@ export class RedditAPI {
     if (cached) {
       return cached;
     }
+    this.assertAnonJsonAllowed();
 
     const data = await this.get<{ data: RedditUser }>(
       `/user/${encodeURIComponent(username)}/about.json`
@@ -781,6 +805,12 @@ export class RedditAPI {
           throw this.httpError(`Not found - r/${subredditName} does not exist or is inaccessible`, 404);
         }
         if (response.status === 403) {
+          if (!isAuthenticated) {
+            // The IP-level block browse_subreddit detects for its own path.
+            // This tool has no RSS fallback, so the message asks for
+            // credentials; the caller cannot retry its way out.
+            throw this.anonBlockedError();
+          }
           // For 403, try to determine if it's a non-existent subreddit or private
           const subredditMatch = endpoint.match(/\/r\/([^\/]+)/);
           const subredditName = subredditMatch ? subredditMatch[1] : null;

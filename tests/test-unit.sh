@@ -1342,6 +1342,55 @@ TOOLDEF_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
 assert "Tool definitions: 5 tools, readOnlyHint under annotations, schemas intact" "echo \"\$TOOLDEF_RESULT\" | grep -q '^pass$'"
 
 
+log_subsection "2y. Anonymous 403 asks for credentials (reddit-api.ts) — NEW"
+
+ANON_403_RESULT=$(HOME="$(mktemp -d)" USERPROFILE="$(mktemp -d)" node --input-type=module -e '
+  import { RedditAPI } from "./dist/services/reddit-api.js";
+  import { AuthManager } from "./dist/core/auth.js";
+  import { RateLimiter } from "./dist/core/rate-limiter.js";
+  import { CacheManager } from "./dist/core/cache.js";
+
+  delete process.env.REDDIT_CLIENT_ID;
+  delete process.env.REDDIT_CLIENT_SECRET;
+  delete process.env.REDDIT_USERNAME;
+  delete process.env.REDDIT_PASSWORD;
+  const auth = new AuthManager();
+  await auth.load();
+  const api = new RedditAPI({
+    authManager: auth,
+    rateLimiter: new RateLimiter({ limit: 20, window: 15 * 60 * 1000, name: "anon" }),
+    cacheManager: new CacheManager(),
+  });
+
+  // a) the search request itself gets a 403: ask for credentials, one request
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response("Blocked", { status: 403, headers: { "content-type": "text/html" } });
+  };
+  let first = "";
+  try { await api.search("claude code"); } catch (e) { first = e.message; }
+  const t1 = /credentials/.test(first);
+  const t2 = !/private|quarantined/i.test(first);
+  const t3 = /browse_subreddit/.test(first) && calls === 1;
+
+  // b) browse proves the block (json 403 + rss ok) and latches it; search
+  // then fails fast without spending a request
+  const feed = "<?xml version=\"1.0\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"></feed>";
+  globalThis.fetch = async (url) => String(url).includes(".rss")
+    ? new Response(feed, { status: 200, headers: { "content-type": "application/atom+xml" } })
+    : new Response("blocked", { status: 403 });
+  await api.browseSubreddit("programming", "hot", { limit: 1 });
+  calls = 0;
+  let second = "";
+  try { await api.search("claude code again"); } catch (e) { second = e.message; }
+  const t4 = second === first;
+  const t5 = calls === 0;
+
+  console.log((t1 && t2 && t3 && t4 && t5) ? "pass" : "fail:" + JSON.stringify({ first, second, calls }));
+' 2>/dev/null)
+assert "Logged-out 403 asks for credentials, then fails fast without a request" "[ \"$ANON_403_RESULT\" = \"pass\" ]"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS
 # ═══════════════════════════════════════════════════════════════════════════════
