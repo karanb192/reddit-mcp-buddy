@@ -593,6 +593,6 @@ export async function startHttpServer(port: number = 3000) {
         console.error(`   Set REDDIT_BUDDY_ALLOWED_HOSTS (comma-separated host:port) to restrict which Host headers are accepted.`);
       }
     }
-    console.error('💡 Tip: Run "reddit-mcp-buddy --auth" for 10x more requests\n');
+    console.error('Approved Reddit API credentials enable additional tools and raise local caps. See README Authentication.\n');
   });
 }

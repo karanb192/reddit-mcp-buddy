@@ -11,7 +11,7 @@ This folder contains development and testing scripts for contributors to validat
 
 2. **After obtaining approved Reddit API access, edit `.env` with your credentials:**
 
-   See [Authentication](../README.md#authentication) for Reddit's approval process. These scripts test local server caps, not guaranteed Reddit quotas.
+   See [Authentication](../README.md#authentication-optional) for Reddit's approval process. These scripts test local server caps, not guaranteed Reddit quotas.
    ```bash
    # Edit scripts/.env and add your credentials
    REDDIT_CLIENT_ID=your_client_id
