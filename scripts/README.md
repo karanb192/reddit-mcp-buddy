@@ -9,13 +9,15 @@ This folder contains development and testing scripts for contributors to validat
    cp scripts/.env.example scripts/.env
    ```
 
-2. **Edit `.env` with your Reddit credentials:**
+2. **After obtaining approved Reddit API access, edit `.env` with your credentials:**
+
+   See [Authentication](../README.md#authentication) for Reddit's approval process. These scripts test local server caps, not guaranteed Reddit quotas.
    ```bash
    # Edit scripts/.env and add your credentials
    REDDIT_CLIENT_ID=your_client_id
    REDDIT_CLIENT_SECRET=your_client_secret
-   REDDIT_USERNAME=your_username      # Optional for 100 rpm
-   REDDIT_PASSWORD=your_password      # Optional for 100 rpm
+   REDDIT_USERNAME=your_username      # Optional for a local cap of 100 rpm
+   REDDIT_PASSWORD=your_password      # Optional for a local cap of 100 rpm
    ```
 
 3. **Test your rate limits:**
@@ -30,7 +32,7 @@ This folder contains development and testing scripts for contributors to validat
 
 ### rate-limit-tester.cjs
 
-Interactive rate limit testing tool that verifies the three-tier rate limiting system:
+Interactive rate limit testing tool for the server's three local caps (Reddit may throttle requests sooner):
 - **Anonymous**: 10 requests/minute (no credentials required)
 - **App-only**: 60 requests/minute (Client ID + Secret only)
 - **Authenticated**: 100 requests/minute (all 4 credentials required)

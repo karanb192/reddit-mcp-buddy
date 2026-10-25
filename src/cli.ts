@@ -28,7 +28,7 @@ async function setupAuth() {
   console.log('  Once approved, open your app at https://www.reddit.com/prefs/apps');
   console.log('  If Reddit directs you to create an app, use:');
   console.log('     • Name: Reddit MCP Buddy (or anything)');
-  console.log('     • Type: Select "script" (IMPORTANT!)');
+  console.log('     • Type: Select "script" for username/password authentication');
   console.log('     • Description: Personal use');
   console.log('     • Redirect URI: http://localhost:8080');
   console.log('  If app creation is unavailable, follow up through Reddit\'s access request process.\n');
@@ -183,10 +183,10 @@ async function setupAuth() {
       console.log('✅ Success! Authentication configured.');
 
       if (username && password) {
-        console.log('📊 Authenticated mode: 100 requests per minute');
+        console.log('📊 Authenticated mode: local cap of 100 requests per minute');
       } else {
-        console.log('📊 App-only mode: Better than anonymous, but limited');
-        console.log('💡 Tip: Provide username/password for full 100 req/min rate limit');
+        console.log('📊 App-only mode: local cap of 60 requests per minute');
+        console.log('Username/password authentication uses a local cap of 100 req/min; Reddit applies its own limits.');
       }
 
       console.log('\nTo start using Reddit MCP Buddy, run:');

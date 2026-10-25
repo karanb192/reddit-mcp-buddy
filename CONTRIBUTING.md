@@ -17,11 +17,11 @@ Thank you for your interest in contributing to Reddit MCP Buddy! This guide will
 
 3. **Set up authentication (optional)**
    ```bash
-   # For higher rate limits (60-100 req/min instead of 10)
+   # With approved API access, local caps are 60-100 req/min instead of 10
    export REDDIT_CLIENT_ID="your_client_id"
    export REDDIT_CLIENT_SECRET="your_client_secret"
-   export REDDIT_USERNAME="your_username"  # Optional, for 100 req/min
-   export REDDIT_PASSWORD="your_password"  # Optional, for 100 req/min
+   export REDDIT_USERNAME="your_username"  # Optional, for a local cap of 100 req/min
+   export REDDIT_PASSWORD="your_password"  # Optional, for a local cap of 100 req/min
    ```
 
 4. **Run in development mode**

@@ -44,7 +44,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for bro
 - **🎯 Clean data** - No fake "sentiment analysis" or made-up metrics
 - **🧠 LLM-optimized** - Built specifically for AI assistants like Claude
 - **📦 TypeScript** - Fully typed, reliable, and maintainable
-- **✅ Proven rate limits** - Thoroughly tested authentication tiers with verification tools
+- **✅ Rate-limit testing** - Verification tools for the server's local authentication tiers
 
 ## Quick Start (30 seconds)
 
@@ -362,8 +362,7 @@ cd reddit-mcp-buddy
 
 | Feature | Reddit MCP Buddy | Other MCP Tools |
 |---------|-------------|----------------|
-| **Zero Setup** | ✅ Browse instantly; free keys unlock the rest | ❌ Keys required for everything |
-| **Max Rate Limit** | ✅ 100 req/min proven | ❓ Unverified claims |
+| **Anonymous Access** | RSS browsing; other data tools require approved API access | Varies by server |
 | **Language** | TypeScript/Node.js | Python (most) |
 | **Tools Count** | 5 (focused) | 8-10 (redundant) |
 | **Fake Metrics** | ✅ Real data only | ❌ "Sentiment scores" |
@@ -478,10 +477,10 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 #### Authentication Variables
 | Variable | Description | Required | Rate Limit |
 |----------|-------------|----------|------------|
-| `REDDIT_CLIENT_ID` | Reddit app client ID | No | 60 req/min (with secret) |
-| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | 60 req/min (with ID) |
-| `REDDIT_USERNAME` | Reddit account username | No | 100 req/min (with all 4) |
-| `REDDIT_PASSWORD` | Reddit account password | No | 100 req/min (with all 4) |
+| `REDDIT_CLIENT_ID` | Reddit app client ID | No | Local cap: 60 req/min (with secret) |
+| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | Local cap: 60 req/min (with ID) |
+| `REDDIT_USERNAME` | Reddit account username | No | Local cap: 100 req/min (with all 4) |
+| `REDDIT_PASSWORD` | Reddit account password | No | Local cap: 100 req/min (with all 4) |
 | `REDDIT_USER_AGENT` | Custom user agent string (applies when credentials are configured) | No | - |
 
 #### Server Configuration
