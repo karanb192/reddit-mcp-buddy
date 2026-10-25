@@ -47,6 +47,8 @@ export class AuthManager {
    * Load authentication configuration
    */
   async load(): Promise<AuthConfig | null> {
+    this.config = null;
+    this.configFromEnv = false;
     // First check environment variables
     const envConfig = this.loadFromEnv();
     if (envConfig) {
@@ -82,9 +84,15 @@ export class AuthManager {
     const clientSecret = this.cleanEnvVar(process.env.REDDIT_CLIENT_SECRET);
     const username = this.cleanEnvVar(process.env.REDDIT_USERNAME);
     const password = this.cleanEnvVar(process.env.REDDIT_PASSWORD);
+    const refreshToken = this.cleanEnvVar(process.env.REDDIT_REFRESH_TOKEN);
     const userAgent = this.cleanEnvVar(process.env.REDDIT_USER_AGENT);
 
-    // Need at least client ID and secret for script apps
+    if (refreshToken && password) {
+      throw new Error('Set REDDIT_REFRESH_TOKEN or REDDIT_PASSWORD, not both.');
+    }
+    if (refreshToken && (!clientId || !clientSecret)) {
+      throw new Error('REDDIT_REFRESH_TOKEN requires REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.');
+    }
     if (!clientId || !clientSecret) {
       return null;
     }
@@ -94,6 +102,7 @@ export class AuthManager {
       clientSecret,
       username,
       password,
+      refreshToken,
       userAgent: userAgent || 'RedditBuddy/1.0 (by /u/karanb192)'
     };
   }
@@ -265,12 +274,16 @@ export class AuthManager {
     }
 
     try {
-      // Reddit script apps use password grant type
       const auth = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64');
 
       let body: string;
 
-      if (this.config.username && this.config.password) {
+      if (this.usesRefreshToken()) {
+        body = new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: this.config.refreshToken!,
+        }).toString();
+      } else if (this.config.username && this.config.password) {
         // Use password grant for authenticated requests (100 req/min)
         body = new URLSearchParams({
           grant_type: 'password',
@@ -295,11 +308,17 @@ export class AuthManager {
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Failed to get access token: ${response.status} - ${error}`);
+        const body = await response.json().catch(() => null);
+        const knownErrors = ['invalid_grant', 'invalid_client', 'unauthorized_client', 'unsupported_grant_type', 'invalid_request', 'invalid_scope'];
+        const parsedError = z.object({ error: z.string() }).safeParse(body);
+        const code = parsedError.success && knownErrors.includes(parsedError.data.error) ? parsedError.data.error : 'unknown_error';
+        throw new Error(`Failed to get access token: HTTP ${response.status} (${code})`);
       }
 
-      const rawData = await response.json();
+      const rawData = await response.json().catch(() => { throw new Error('Reddit returned invalid OAuth JSON.'); });
+      if (rawData && typeof rawData === 'object' && 'error' in rawData) {
+        throw new Error('Reddit rejected the OAuth grant. Reauthorize the app or check its credentials.');
+      }
 
       // Validate token response structure
       let data;
@@ -345,12 +364,19 @@ export class AuthManager {
         // Never save password to disk
         const configToSave = { ...this.config };
         delete configToSave.password;
+        delete configToSave.refreshToken;
 
         // Save updated config
         await this.save(configToSave);
       }
     } catch (error) {
-      throw new Error(`Failed to refresh access token: ${error}`);
+      let message = error instanceof Error ? error.message : 'OAuth request failed';
+      for (const secret of [this.config.clientSecret, this.config.password, this.config.refreshToken, this.config.accessToken]) {
+        if (secret) {
+          message = message.split(secret).join('[REDACTED]').split(encodeURIComponent(secret)).join('[REDACTED]');
+        }
+      }
+      throw new Error(`Failed to refresh access token: ${message}`);
     }
   }
 
@@ -394,8 +420,7 @@ export class AuthManager {
     if (!this.isAuthenticated()) {
       return 10; // No auth at all
     }
-    // Full auth with username/password: 100, app-only: 60
-    return (this.config?.username && this.config?.password) ? 100 : 60;
+    return this.hasUserContext() ? 100 : 60;
   }
 
   /**
@@ -416,6 +441,19 @@ export class AuthManager {
            !!this.config?.password;
   }
 
+  usesRefreshToken(): boolean {
+    return this.configFromEnv && !!this.config?.refreshToken;
+  }
+
+  hasUserContext(): boolean {
+    return this.hasFullAuth() || (this.isAuthenticated() && this.usesRefreshToken());
+  }
+
+  hasScopes(required: readonly string[]): boolean {
+    const granted = new Set(this.config?.scope?.split(/\s+/) ?? []);
+    return granted.has('*') || required.every(scope => granted.has(scope));
+  }
+
   /**
    * Get auth mode string for display
    */
@@ -423,6 +461,7 @@ export class AuthManager {
     if (!this.isAuthenticated()) {
       return 'Anonymous';
     }
+    if (this.usesRefreshToken()) return 'Authenticated (OAuth refresh token)';
     return this.hasFullAuth() ? 'Authenticated' : 'App-Only';
   }
 
