@@ -17,11 +17,11 @@ Thank you for your interest in contributing to Reddit MCP Buddy! This guide will
 
 3. **Set up authentication (optional)**
    ```bash
-   # For higher rate limits (60-100 req/min instead of 10)
+   # With approved API access, local caps are 60-100 req/min instead of 10
    export REDDIT_CLIENT_ID="your_client_id"
    export REDDIT_CLIENT_SECRET="your_client_secret"
-   export REDDIT_USERNAME="your_username"  # Optional, for 100 req/min
-   export REDDIT_PASSWORD="your_password"  # Optional, for 100 req/min
+   export REDDIT_USERNAME="your_username"  # Optional, for a local cap of 100 req/min
+   export REDDIT_PASSWORD="your_password"  # Optional, for a local cap of 100 req/min
    ```
 
 4. **Run in development mode**
@@ -109,6 +109,10 @@ node scripts/rate-limit-tester.cjs auth 120        # Test 120 requests in authen
 ## 🔑 Authentication Setup
 
 ### Creating a Reddit App
+
+First obtain explicit approval for your app and use case under Reddit's [Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy). Reddit directs developers to [Devvit](https://developers.reddit.com/) first. If it does not support your use case, use [Reddit's API access request form](https://support.reddithelp.com/hc/en-us/requests/new?tf_42139884615700=api_request_type_developer_clone&ticket_form_id=14868593862164).
+
+After approval, use your existing app or follow Reddit's instructions to register one. The steps below describe the app form, not a way to bypass approval.
 
 1. Go to https://www.reddit.com/prefs/apps
 2. Click "Create App" or "Create Another App"

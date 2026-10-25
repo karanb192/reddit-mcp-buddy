@@ -17,17 +17,21 @@ const __dirname = dirname(__filename);
 
 async function setupAuth() {
   console.log('\n🚀 Reddit MCP Buddy Authentication Setup\n');
-  console.log('This will help you set up authentication for 10x more requests.\n');
+  console.log('Use credentials for a Reddit app and use case that Reddit has approved.\n');
 
-  console.log('Step 1: Create a Reddit App');
-  console.log('  1. Open: https://www.reddit.com/prefs/apps');
-  console.log('  2. Click "Create App" or "Create Another App"');
-  console.log('  3. Fill in:');
+  console.log('Step 1: Obtain Reddit API approval');
+  console.log('  Policy: https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy');
+  console.log('  Start with Devvit: https://developers.reddit.com/');
+  console.log('  If Devvit does not support your use case, request access:');
+  console.log('  https://support.reddithelp.com/hc/en-us/requests/new?tf_42139884615700=api_request_type_developer_clone&ticket_form_id=14868593862164');
+  console.log('  Creating an app does not guarantee API access. This server cannot grant approval.');
+  console.log('  Once approved, open your app at https://www.reddit.com/prefs/apps');
+  console.log('  If Reddit directs you to create an app, use:');
   console.log('     • Name: Reddit MCP Buddy (or anything)');
-  console.log('     • Type: Select "script" (IMPORTANT!)');
+  console.log('     • Type: Select "script" for username/password authentication');
   console.log('     • Description: Personal use');
   console.log('     • Redirect URI: http://localhost:8080');
-  console.log('  4. Click "Create app"\n');
+  console.log('  If app creation is unavailable, follow up through Reddit\'s access request process.\n');
 
   console.log('Step 2: Find your credentials');
   console.log('  • Client ID: Look under "personal use script" (e.g., XaBcDeFgHiJkLm)');
@@ -56,7 +60,8 @@ async function setupAuth() {
       process.exit(1);
     }
 
-    console.log('\nFor full authentication (100 requests/minute), enter your Reddit account details.');
+    console.log('\nFor password-grant authentication with an approved script app, enter your Reddit account details.');
+    console.log('The 60/100 requests-per-minute caps are local limits, not guaranteed Reddit quotas.');
     console.log('Leave blank for app-only auth (still better than anonymous).\n');
 
     const username = await rl.question('Reddit Username (optional): ');
@@ -178,10 +183,10 @@ async function setupAuth() {
       console.log('✅ Success! Authentication configured.');
 
       if (username && password) {
-        console.log('📊 Authenticated mode: 100 requests per minute');
+        console.log('📊 Authenticated mode: local cap of 100 requests per minute');
       } else {
-        console.log('📊 App-only mode: Better than anonymous, but limited');
-        console.log('💡 Tip: Provide username/password for full 100 req/min rate limit');
+        console.log('📊 App-only mode: local cap of 60 requests per minute');
+        console.log('Username/password authentication uses a local cap of 100 req/min; Reddit applies its own limits.');
       }
 
       console.log('\nTo start using Reddit MCP Buddy, run:');
