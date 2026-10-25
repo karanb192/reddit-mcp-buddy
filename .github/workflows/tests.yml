@@ -63,7 +63,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
 
       - name: Install dependencies
         run: npm ci
@@ -86,7 +86,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
 
       - name: Install dependencies
         run: npm ci
@@ -99,3 +99,18 @@ jobs:
       # regression rather than an environment limitation.
       - name: Run integration tests
         run: bash tests/test-integration.sh
+
+  docker-smoke:
+    name: Docker Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --pull -t reddit-mcp-buddy:test .
+
+      - name: Test Docker image
+        run: bash tests/test-docker.sh reddit-mcp-buddy:test

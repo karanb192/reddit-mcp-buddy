@@ -313,12 +313,23 @@ npm link
 ```
 
 ### Using Docker
+
+The Docker image and CI workflows use Node.js 26. To build and run the image:
+
 ```bash
 git clone https://github.com/karanb192/reddit-mcp-buddy.git
 cd reddit-mcp-buddy
-docker build -t reddit-mcp-buddy .
+docker build --pull -t reddit-mcp-buddy .
 docker run -it reddit-mcp-buddy
 ```
+
+Run the container smoke test with Docker, curl, and jq installed:
+
+```bash
+bash tests/test-docker.sh reddit-mcp-buddy
+```
+
+The test checks container health, MCP initialization, tool discovery, and shutdown without Reddit credentials.
 
 ### Claude Desktop Extension
 
