@@ -763,7 +763,9 @@ export class RedditAPI {
           // Retry with new token
           return this.getImpl<T>(endpoint, retries - 1);
         } catch (refreshError) {
-          throw new Error('Authentication failed. Please run: reddit-mcp-buddy --auth');
+          throw new Error(this.auth.usesRefreshToken()
+            ? 'Authentication failed. Reauthorize your Reddit app and update REDDIT_REFRESH_TOKEN, or check the app credentials.'
+            : 'Authentication failed. Please run: reddit-mcp-buddy --auth');
         }
       }
 

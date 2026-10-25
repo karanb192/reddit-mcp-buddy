@@ -1343,6 +1343,7 @@ assert "Tool definitions: 5 tools, readOnlyHint under annotations, schemas intac
 
 
 assert "API retries return long waits immediately and preserve transient recovery" "node tests/api-access-unit.mjs"
+assert "OAuth refresh auth: grants, scopes, credential isolation, and redacted failures" "node tests/auth-refresh-unit.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS
