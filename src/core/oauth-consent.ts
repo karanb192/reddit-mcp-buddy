@@ -88,6 +88,14 @@ export function parseLoopbackRedirect(redirectUri: string): URL {
   return url;
 }
 
+/**
+ * Loopback only, never all interfaces. "localhost" binds IPv4, which browsers
+ * reach for localhost redirects even when ::1 resolves first.
+ */
+export function listenHost(redirect: URL): string {
+  return redirect.hostname === '[::1]' ? '::1' : '127.0.0.1';
+}
+
 export function buildAuthorizeUrl(clientId: string, state: string, redirectUri: string, scopes: readonly string[]): string {
   const url = new URL(AUTHORIZE_URL);
   url.search = new URLSearchParams({
@@ -212,10 +220,7 @@ export function runOAuthConsent(options: OAuthConsentOptions): Promise<OAuthCons
         ? `Port ${redirect.port} is in use. Free it or register another loopback redirect URI and pass --redirect-uri.`
         : `Could not start the local callback server: ${error.message}`));
     });
-    // Loopback only, never all interfaces. "localhost" binds IPv4, which browsers
-    // reach for localhost redirects even when ::1 resolves first.
-    const host = redirect.hostname === '[::1]' ? '::1' : '127.0.0.1';
-    server.listen(Number(redirect.port), host, () => {
+    server.listen(Number(redirect.port), listenHost(redirect), () => {
       options.onAuthorizeUrl(buildAuthorizeUrl(options.clientId, state, options.redirectUri, options.scopes));
     });
   });

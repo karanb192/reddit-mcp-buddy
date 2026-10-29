@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, statSync, rmSync, writeFileSync } from 'node
 import { tmpdir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import {
-  parseOAuthArgs, parseLoopbackRedirect, buildAuthorizeUrl, scopesFor, runOAuthConsent, writeTokenFile,
+  parseOAuthArgs, parseLoopbackRedirect, buildAuthorizeUrl, listenHost, scopesFor, runOAuthConsent, writeTokenFile,
 } from '../dist/core/oauth-consent.js';
 
 const clientSecret = 'offline-client-secret';
@@ -20,13 +20,15 @@ async function freePort() {
   return port;
 }
 
-function callback(url) {
+function callback(url, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
-    get(url, res => {
+    const req = get(url, res => {
       let body = '';
       res.on('data', chunk => { body += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, body }));
-    }).on('error', reject);
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
+    req.on('error', reject);
   });
 }
 
@@ -80,6 +82,9 @@ try {
     assert.throws(() => parseLoopbackRedirect(bad), /redirect URI/, bad);
   }
   assert.equal(parseLoopbackRedirect('http://[::1]:8080').hostname, '[::1]');
+  for (const [uri, host] of [['http://localhost:8080', '127.0.0.1'], ['http://127.0.0.1:8080', '127.0.0.1'], ['http://[::1]:8080', '::1']]) {
+    assert.equal(listenHost(parseLoopbackRedirect(uri)), host, uri);
+  }
   const built = new URL(buildAuthorizeUrl('cid', 'st', 'http://localhost:8080', ['identity', 'read']));
   assert.equal(built.origin + built.pathname, 'https://www.reddit.com/api/v1/authorize');
   assert.equal(built.searchParams.get('duration'), 'permanent');
@@ -113,9 +118,9 @@ try {
     let reached;
     const pending = runOAuthConsent({ clientId: 'c', clientSecret: 's', scopes: ['identity'], timeoutMs: 2000,
       redirectUri: `http://localhost:${probePort}`, fetch: redditFetch().impl,
-      onAuthorizeUrl: () => { reached = callback(`http://${external.address}:${probePort}/`).then(r => r.status, e => e.code); } });
+      onAuthorizeUrl: () => { reached = callback(`http://${external.address}:${probePort}/`, 500).then(r => r.status, e => e.code); } });
     await pending.catch(() => {});
-    assert.equal(await reached, 'ECONNREFUSED', 'the callback server must not listen on non-loopback interfaces');
+    assert.ok(['ECONNREFUSED', 'ETIMEDOUT'].includes(await reached), 'the callback server must not listen on non-loopback interfaces');
   } else {
     console.log('  (no non-loopback IPv4 interface; bind check skipped)');
   }
