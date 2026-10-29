@@ -11,6 +11,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join } from 'path';
 import readline from 'readline/promises';
+import { Writable } from 'stream';
 import { parseOAuthArgs, parseLoopbackRedirect, runOAuthConsent, scopesFor, writeTokenFile } from './core/oauth-consent.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -216,6 +217,27 @@ async function setupAuth() {
   }
 }
 
+// readline echoes typed input through its output stream; muting that stream
+// after the prompt is written keeps the secret out of the terminal scrollback.
+async function promptHidden(question: string): Promise<string> {
+  let muted = false;
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      if (!muted) process.stdout.write(chunk);
+      callback();
+    },
+  });
+  const rl = readline.createInterface({ input: process.stdin, output, terminal: !!process.stdin.isTTY });
+  try {
+    const answer = rl.question(question);
+    muted = true;
+    return await answer;
+  } finally {
+    rl.close();
+    process.stdout.write('\n');
+  }
+}
+
 async function setupOAuth(argv: string[]) {
   const options = parseOAuthArgs(argv);
   parseLoopbackRedirect(options.redirectUri);
@@ -228,14 +250,16 @@ async function setupOAuth(argv: string[]) {
 
   let clientId = process.env.REDDIT_CLIENT_ID?.trim();
   let clientSecret = process.env.REDDIT_CLIENT_SECRET?.trim();
-  if (!clientId || !clientSecret) {
+  if (!clientId) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
-      clientId = clientId || (await rl.question('Enter your web app Client ID: ')).trim();
-      clientSecret = clientSecret || (await rl.question('Enter your web app Client Secret: ')).trim();
+      clientId = (await rl.question('Enter your web app Client ID: ')).trim();
     } finally {
       rl.close();
     }
+  }
+  if (!clientSecret) {
+    clientSecret = (await promptHidden('Enter your web app Client Secret: ')).trim();
   }
   if (!clientId || !clientSecret) {
     throw new Error('A client ID and client secret are required.');

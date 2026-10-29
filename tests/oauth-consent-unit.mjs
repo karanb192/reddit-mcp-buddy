@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, get } from 'node:http';
 import { mkdtempSync, readFileSync, statSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import {
   parseOAuthArgs, parseLoopbackRedirect, buildAuthorizeUrl, scopesFor, runOAuthConsent, writeTokenFile,
@@ -105,6 +105,21 @@ try {
     for (const secret of [clientSecret, refreshSecret, accessSecret, code]) assert.ok(!response.body.includes(secret));
   }
 
+  // Loopback only: while the callback server listens, a non-loopback address of
+  // this machine must refuse the connection.
+  const external = Object.values(networkInterfaces()).flat().find(n => n && n.family === 'IPv4' && !n.internal);
+  if (external) {
+    const probePort = await freePort();
+    let reached;
+    const pending = runOAuthConsent({ clientId: 'c', clientSecret: 's', scopes: ['identity'], timeoutMs: 2000,
+      redirectUri: `http://localhost:${probePort}`, fetch: redditFetch().impl,
+      onAuthorizeUrl: () => { reached = callback(`http://${external.address}:${probePort}/`).then(r => r.status, e => e.code); } });
+    await pending.catch(() => {});
+    assert.equal(await reached, 'ECONNREFUSED', 'the callback server must not listen on non-loopback interfaces');
+  } else {
+    console.log('  (no non-loopback IPv4 interface; bind check skipped)');
+  }
+
   const denied = await consent({ respond: state => [`/callback?state=${state}&error=access_denied`] });
   assert.match(denied.error.message, /not granted/);
   assert.equal(denied.calls.length, 0);
@@ -135,6 +150,17 @@ try {
 
   const timedOut = await consent({ timeoutMs: 50, respond: () => [] });
   assert.match(timedOut.error.message, /Timed out/);
+
+  // An accepted callback stops the consent timer, so a slow exchange still delivers the token.
+  const slow = redditFetch();
+  const slowFetch = async (url, init) => { await new Promise(r => setTimeout(r, 300)); return slow.impl(url, init); };
+  const slowPort = await freePort();
+  const late = await runOAuthConsent({ clientId: 'c', clientSecret: 's', scopes: ['identity'], timeoutMs: 150,
+    redirectUri: `http://localhost:${slowPort}`, fetch: slowFetch,
+    onAuthorizeUrl: url => { callback(`http://127.0.0.1:${slowPort}/?state=${new URL(url).searchParams.get('state')}&code=${code}`); } })
+    .then(value => ({ value }), error => ({ error }));
+  assert.ifError(late.error);
+  assert.equal(late.value.refreshToken, refreshSecret);
 
   const busyPort = await freePort();
   const blocker = createServer();

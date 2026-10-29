@@ -182,6 +182,9 @@ export function runOAuthConsent(options: OAuthConsentOptions): Promise<OAuthCons
         return;
       }
       handling = true;
+      // From here the exchange settles the flow on its own request timeouts; a
+      // consent timer firing mid-exchange would drop a token Reddit already issued.
+      clearTimeout(timer);
       const code = url.searchParams.get('code');
       if (url.searchParams.has('error') || !code) {
         reply(res, 400, 'Authorization was not granted. You can close this tab.');
