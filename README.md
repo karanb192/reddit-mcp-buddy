@@ -282,7 +282,7 @@ Add `REDDIT_BUDDY_WRITE` next to your existing credentials:
 
 Claude Desktop extension users: flip the **Enable posting tools** toggle in the extension settings instead. It maps to the same `REDDIT_BUDDY_WRITE` variable.
 
-Alternatively, replace `REDDIT_PASSWORD` with `REDDIT_REFRESH_TOKEN` from the web-app consent flow above. Posting requires the granted scopes `identity`, `read`, `submit`, and `flair`. Add `history` if you also use `user_analysis`. `REDDIT_USERNAME` is optional with a refresh token; when provided, it must match the account returned by Reddit.
+Alternatively, replace `REDDIT_PASSWORD` with `REDDIT_REFRESH_TOKEN` from the [web-app consent flow](#web-apps-with-oauth-consent); `npx -y reddit-mcp-buddy --oauth --write` requests the posting scopes. Posting requires the granted scopes `identity`, `read`, `submit`, and `flair`. Add `history` if you also use `user_analysis`. `REDDIT_USERNAME` is optional with a refresh token; when provided, it must match the account returned by Reddit.
 
 Credentials must come from environment variables (or extension config fields, which become environment variables). The interactive `--auth` file setup does not enable posting. Startup verifies the account through Reddit and checks granted scopes. If any requirement is missing, the server logs the reason and keeps posting tools disabled.
 
