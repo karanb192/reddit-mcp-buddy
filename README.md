@@ -199,7 +199,18 @@ Without credentials, `browse_subreddit` can use public RSS feeds and `reddit_exp
 
 ### Web apps with OAuth consent
 
-An approved web app can authenticate a user without their Reddit password. Complete Reddit's [authorization-code flow](https://github.com/reddit-archive/reddit/wiki/OAuth2#authorization) with your registered redirect URI, a random `state` value that your callback verifies, and `duration=permanent` to obtain a refresh token. Request `identity`, `read`, and `history` for the read-only tools; Reddit documents each endpoint's required scope in its [API reference](https://www.reddit.com/dev/api).
+An approved web app can authenticate a user without their Reddit password. `--oauth` runs Reddit's [authorization-code flow](https://github.com/reddit-archive/reddit/wiki/OAuth2#authorization) once and prints a refresh token.
+
+1. **Register the redirect URI.** On [Reddit app preferences](https://www.reddit.com/prefs/apps), the web app's redirect URI must be a loopback address with a port, such as `http://localhost:8080`.
+2. **Run the consent command** on the machine where your browser is signed in to Reddit:
+
+   ```bash
+   npx -y reddit-mcp-buddy --oauth
+   ```
+
+   It prompts for the web app's client ID and secret, or reads `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` from the environment. It requests `identity`, `read`, and `history`, which the read-only tools need. Add `--write` to also request `submit` and `flair` for [posting](#posting-v120). Pass `--redirect-uri http://localhost:<port>` if you registered a different port.
+3. **Open the printed link and click Allow.** Reddit redirects back to a temporary local server that only listens on your machine. It checks the random `state` value, exchanges the one-time code, and confirms the account with `/api/v1/me`. It waits up to 5 minutes and never posts.
+4. **Copy the token into your config.** It prints `REDDIT_REFRESH_TOKEN=...`. To keep it off the screen, add `--out token.env`; the file is created readable only by you and is never overwritten.
 
 Set these variables in the server's environment:
 
