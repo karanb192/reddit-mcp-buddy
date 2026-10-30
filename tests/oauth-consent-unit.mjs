@@ -26,7 +26,7 @@ function callback(url, timeoutMs = 5000) {
     const req = get(url, res => {
       let body = '';
       res.on('data', chunk => { body += chunk; });
-      res.on('end', () => resolve({ status: res.statusCode, body }));
+      res.on('end', () => resolve({ status: res.statusCode, body, connection: res.headers.connection }));
     });
     req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
     req.on('error', reject);
@@ -117,6 +117,7 @@ try {
   assert.equal(ok.value.username, 'offline_user');
   assert.deepEqual(ok.responses.map(r => r.status), [404, 400, 200]);
   assert.match(ok.responses[2].body, /Authorized as u\/offline_user/);
+  assert.ok(ok.responses.every(r => r.connection === 'close'), 'replies must close the connection so the CLI can exit');
   assert.equal(ok.authorizeUrl.searchParams.get('client_id'), 'offline-client');
   assert.equal(ok.authorizeUrl.searchParams.get('response_type'), 'code');
   assert.equal(ok.authorizeUrl.searchParams.get('redirect_uri'), ok.redirectUri);

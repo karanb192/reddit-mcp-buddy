@@ -210,7 +210,7 @@ An approved web app can authenticate a user without their Reddit password. `--oa
 
    It prompts for the web app's client ID and secret, or reads `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` from the environment. It requests `identity`, `read`, and `history`, which the read-only tools need. Add `--write` to also request `submit` and `flair` for [posting](#posting-v120). Pass `--redirect-uri http://localhost:<port>` if you registered a different port.
 3. **Open the printed link and click Allow.** Reddit redirects back to a temporary local server that only listens on your machine. It checks the random `state` value, exchanges the one-time code, and confirms the account with `/api/v1/me`. It waits up to 5 minutes and never posts.
-4. **Copy the token into your config.** It prints `REDDIT_REFRESH_TOKEN=...`. To keep it off the screen, add `--out ~/reddit-token.env`, a path outside any repository. The file is never overwritten, and on macOS and Linux it is created readable only by you.
+4. **Copy the token into your config.** It prints `REDDIT_REFRESH_TOKEN=...`. To keep it off the screen, add `--out ~/reddit-token.env`, a path outside any repository. If that file already exists, the command stops before asking for consent. If writing fails after consent, it prints the token instead. On macOS and Linux the file is readable only by you.
 
 Set these variables in the server's environment:
 

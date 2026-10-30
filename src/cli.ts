@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join } from 'path';
 import readline from 'readline/promises';
 import { Writable } from 'stream';
+import { existsSync } from 'fs';
 import { parseOAuthArgs, parseLoopbackRedirect, runOAuthConsent, scopesFor, writeTokenFile } from './core/oauth-consent.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -241,6 +242,9 @@ async function promptHidden(question: string): Promise<string> {
 async function setupOAuth(argv: string[]) {
   const options = parseOAuthArgs(argv);
   parseLoopbackRedirect(options.redirectUri);
+  if (options.out && existsSync(options.out)) {
+    throw new Error(`${options.out} already exists. Choose a new path for --out; it is never overwritten.`);
+  }
   const scopes = scopesFor(options.write);
 
   console.log('\n🔐 Reddit MCP Buddy OAuth Setup\n');
@@ -279,10 +283,19 @@ async function setupOAuth(argv: string[]) {
   });
 
   console.log(`\n✅ Authorized as u/${result.username} with scopes: ${result.scopes.join(' ')}`);
+  let saved = false;
   if (options.out) {
-    await writeTokenFile(options.out, result.refreshToken);
-    console.log(`Refresh token saved to ${options.out} (readable only by you).`);
-  } else {
+    try {
+      await writeTokenFile(options.out, result.refreshToken);
+      saved = true;
+      console.log(`Refresh token saved to ${options.out} (owner-only on macOS and Linux).`);
+    } catch (error) {
+      // Reddit has already issued the token; losing it here would force a new consent.
+      console.error(`\n⚠️ Could not write ${options.out}: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
+  }
+  if (!saved) {
     console.log('Add this to the server environment. Treat it like a password:\n');
     console.log(`REDDIT_REFRESH_TOKEN=${result.refreshToken}\n`);
   }

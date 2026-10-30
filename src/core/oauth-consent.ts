@@ -170,7 +170,8 @@ export function runOAuthConsent(options: OAuthConsentOptions): Promise<OAuthCons
       else resolve(result as OAuthConsentResult);
     };
     const reply = (res: ServerResponse, status: number, message: string) => {
-      res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+      // Connection: close so a browser keep-alive socket cannot hold the CLI open after it finishes.
+      res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', Connection: 'close' });
       res.end(message);
     };
 
