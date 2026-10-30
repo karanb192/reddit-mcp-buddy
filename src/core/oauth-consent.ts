@@ -175,7 +175,14 @@ export function runOAuthConsent(options: OAuthConsentOptions): Promise<OAuthCons
     };
 
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      const url = new URL(req.url ?? '/', redirect);
+      let url: URL;
+      try {
+        url = new URL(req.url ?? '/', redirect);
+      } catch {
+        // Any page in the browser can send a malformed target such as //%; it must not crash the flow.
+        reply(res, 400, 'Bad request.');
+        return;
+      }
       // Stray requests (favicon, probes, a stale tab) must not end the flow.
       if (req.method !== 'GET' || url.pathname !== expectedPath) {
         reply(res, 404, 'Not found.');

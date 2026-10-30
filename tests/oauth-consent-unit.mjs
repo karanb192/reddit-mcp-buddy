@@ -3,6 +3,7 @@ import { createServer, get } from 'node:http';
 import { mkdtempSync, readFileSync, statSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
+import { connect } from 'node:net';
 import {
   parseOAuthArgs, parseLoopbackRedirect, buildAuthorizeUrl, listenHost, scopesFor, runOAuthConsent, writeTokenFile,
 } from '../dist/core/oauth-consent.js';
@@ -89,6 +90,25 @@ try {
   assert.equal(built.origin + built.pathname, 'https://www.reddit.com/api/v1/authorize');
   assert.equal(built.searchParams.get('duration'), 'permanent');
   assert.equal(built.searchParams.get('scope'), 'identity read');
+
+  // A malformed request target gets 400 and consent still completes afterwards.
+  const malformedPort = await freePort();
+  let malformedStatus;
+  const recovered = await runOAuthConsent({ clientId: 'offline-client', clientSecret, scopes: scopesFor(false),
+    redirectUri: `http://localhost:${malformedPort}`, fetch: redditFetch().impl, timeoutMs: 5000,
+    onAuthorizeUrl: async url => {
+      malformedStatus = await new Promise((resolve, reject) => {
+        const socket = connect(malformedPort, '127.0.0.1', () => socket.end('GET //% HTTP/1.1\r\nHost: localhost\r\n\r\n'));
+        let data = '';
+        socket.on('data', chunk => { data += chunk; });
+        socket.on('end', () => resolve(Number(data.split(' ')[1])));
+        socket.on('error', reject);
+      });
+      await callback(`http://127.0.0.1:${malformedPort}/?state=${new URL(url).searchParams.get('state')}&code=${code}`);
+    } }).then(value => ({ value }), error => ({ error }));
+  assert.equal(malformedStatus, 400);
+  assert.ifError(recovered.error);
+  assert.equal(recovered.value.refreshToken, refreshSecret);
 
   // Success, after a stray request and a forged state that must not end the flow
   const ok = await consent({ respond: state => ['/favicon.ico', '/callback?state=forged&code=x', `/callback?state=${state}&code=${code}`] });
