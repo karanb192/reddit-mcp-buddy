@@ -7,7 +7,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   CallToolRequestSchema,
+  ErrorCode,
   ListToolsRequestSchema,
+  McpError,
   Tool
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
@@ -38,6 +40,45 @@ import {
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
 export const SERVER_VERSION = '1.2.0';
+
+// Upper bound on the number of array elements and object members a single tool
+// call may carry. @modelcontextprotocol/sdk 1.32.2 enforces the same count on
+// McpServer through its maxToolInputElements option, but this server is built
+// on the low-level Server class, which does not expose that option, so the
+// bound is applied here for every tool call on both transports (stdio and
+// HTTP). The largest legitimate call this repo's own schemas allow is
+// search_reddit with its maximum 10 subreddits and every optional field set,
+// which counts 17 elements; the cap sits ~58x above that.
+const MAX_TOOL_INPUT_ELEMENTS = 1_000;
+
+// Mirrors @modelcontextprotocol/sdk's toolInputElementCount: array elements and
+// own object members count recursively, stopping as soon as the running total
+// passes the maximum. Strings and numbers themselves are free; only structure
+// counts. This keeps the repo's low-level Server bound identical to the SDK's
+// McpServer bound instead of inventing a different rule.
+function toolInputElementCount(value: unknown, max: number): number {
+  let count = 0;
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== 'object') continue;
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        if (++count > max) return count;
+        if (child !== null && typeof child === 'object') stack.push(child);
+      }
+    } else {
+      const record = node as Record<string, unknown>;
+      for (const key in record) {
+        if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
+        if (++count > max) return count;
+        const child = record[key];
+        if (child !== null && typeof child === 'object') stack.push(child);
+      }
+    }
+  }
+  return count;
+}
 
 // MCP Response validation schemas (per MCP spec)
 const ContentBlockSchema = z.object({
@@ -497,6 +538,21 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
   // Register handlers with the MCP server
   server.setRequestHandler(ListToolsRequestSchema, handlers['tools/list']);
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    // Refuse an oversized tool input before it reaches the handler's zod
+    // parsing, which otherwise walks every element of an array argument.
+    // McpError is converted by the protocol layer into a JSON-RPC -32602
+    // error, the same surface the SDK's maxToolInputElements check produces
+    // on McpServer.
+    if (
+      args !== undefined &&
+      toolInputElementCount(args, MAX_TOOL_INPUT_ELEMENTS) > MAX_TOOL_INPUT_ELEMENTS
+    ) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Invalid arguments for tool ${name}: arguments contain more than the maximum of ${MAX_TOOL_INPUT_ELEMENTS} elements`,
+      );
+    }
     return handlers['tools/call'](request.params);
   });
   
