@@ -56,6 +56,16 @@ try {
     else await retrying.search('test');
     assert.equal(calls, 2, 'quota reset on 503 must not suppress transient recovery');
   }
+  globalThis.fetch = async url => String(url).includes('.rss')
+    ? new Response('<html>blocked</html>', { status: 403, headers: { 'content-type': 'text/html' } })
+    : new Response('blocked', { status: 403 });
+  // CI's path: an earlier browse already proved the logged-out JSON block, so the RSS error reaches the caller directly.
+  const latched = client();
+  latched['anonJsonBlockedUntil'] = Date.now() + 60000;
+  await assert.rejects(latched.browseSubreddit('all', 'rising'),
+    error => error.status === 403 && error.message.includes('refused the logged-out RSS feed for r/all/rising') && !/private|quarantined/.test(error.message));
+  await assert.rejects(client().browseSubreddit('popular', 'hot'), error => error.message.includes('refused the logged-out RSS feed for r/popular/hot'));
+  await assert.rejects(client().browseSubreddit('programming', 'rising'), error => /private, quarantined, or NSFW/.test(error.message));
   const parsing = client();
   assert.equal(parsing.getRetryAfterDelay(new Response('', { headers: { 'retry-after': 'invalid' } })), null);
   assert.equal(parsing.getRetryAfterDelay(new Response('', { headers: { 'retry-after': '-1' } })), null);

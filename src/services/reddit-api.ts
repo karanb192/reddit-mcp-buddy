@@ -261,6 +261,10 @@ export class RedditAPI {
       if (status === 404) {
         throw new Error(`Not found - r/${subreddit} does not exist or is inaccessible`);
       }
+      if (status === 403 && /^(all|popular)$/i.test(subreddit)) {
+        // Aggregates cannot be private or quarantined; Reddit is refusing this logged-out feed.
+        throw this.httpError(`Reddit refused the logged-out RSS feed for r/${subreddit}/${sort} (HTTP 403). Try another sort or a specific subreddit, or add approved Reddit API credentials.`, 403);
+      }
       if (status === 403) {
         throw new Error(`Cannot access r/${subreddit} - it may be private, quarantined, or NSFW (Reddit's logged-out feed refuses NSFW subreddits)`);
       }
