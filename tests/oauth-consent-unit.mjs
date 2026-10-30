@@ -170,7 +170,10 @@ try {
 
   const replay = await consent({ parallel: true, respond: state => [`/callback?state=${state}&code=${code}`, `/callback?state=${state}&code=${code}`] });
   assert.ifError(replay.error);
-  assert.deepEqual(replay.responses.map(r => r.status).sort(), [200, 409]);
+  // The second request either gets 409 or, if it lands after the server closed, a reset connection; never a second success.
+  const replayStatuses = replay.responses.map(r => r.status);
+  assert.equal(replayStatuses.filter(status => status === 200).length, 1, String(replayStatuses));
+  assert.ok(replayStatuses.every(status => [200, 409, 'ECONNRESET', 'ECONNREFUSED', 'EPIPE'].includes(status)), String(replayStatuses));
   assert.equal(replay.calls.filter(call => call.url.endsWith('/access_token')).length, 1, 'a replayed callback must not exchange twice');
 
   const timedOut = await consent({ timeoutMs: 50, respond: () => [] });
