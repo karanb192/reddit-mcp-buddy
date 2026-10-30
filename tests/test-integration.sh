@@ -180,7 +180,8 @@ assert_contains_live() {
   local description="$1"
   local haystack="$2"
   local needle="$3"
-  if is_throttled "$haystack"; then
+  # A feed refusal is not throttling; only assert_aggregate_live may skip it.
+  if is_throttled "$haystack" && ! echo "$haystack" | grep -q 'refused the logged-out RSS feed'; then
     skip_test "$description" "Reddit throttled the request (HTTP 429)"
   else
     assert_contains "$description" "$haystack" "$needle"
