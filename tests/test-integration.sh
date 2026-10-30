@@ -164,17 +164,17 @@ is_throttled() {
 # Reddit can refuse a logged-out aggregate feed (r/all, r/popular) for the
 # runner's IP. That is Reddit policy, not a server regression, so report it.
 is_feed_refused() {
-  echo "$1" | grep -q 'refused the logged-out RSS feed'
+  echo "$1" | grep -q '^{"_raw":"Error: ' && echo "$1" | grep -qE 'refused the logged-out RSS feed for r/(all|popular)/[a-z]+ \(HTTP 403\)'
 }
 
 assert_contains_live() {
   local description="$1"
   local haystack="$2"
   local needle="$3"
-  if is_throttled "$haystack"; then
-    skip_test "$description" "Reddit throttled the request (HTTP 429)"
-  elif is_feed_refused "$haystack"; then
+  if is_feed_refused "$haystack"; then
     skip_test "$description" "Reddit refused the logged-out aggregate feed (HTTP 403)"
+  elif is_throttled "$haystack"; then
+    skip_test "$description" "Reddit throttled the request (HTTP 429)"
   else
     assert_contains "$description" "$haystack" "$needle"
   fi

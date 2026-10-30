@@ -64,7 +64,7 @@ try {
   latched['anonJsonBlockedUntil'] = Date.now() + 60000;
   await assert.rejects(latched.browseSubreddit('all', 'rising'),
     error => error.status === 403 && error.message.includes('refused the logged-out RSS feed for r/all/rising') && !/private|quarantined/.test(error.message));
-  await assert.rejects(client().browseSubreddit('popular', 'hot'), error => error.message.includes('refused the logged-out RSS feed for r/popular/hot'));
+  await assert.rejects(client().browseSubreddit('popular', 'hot'), error => error.status === 403 && error.message.includes('refused the logged-out RSS feed for r/popular/hot'));
   await assert.rejects(client().browseSubreddit('programming', 'rising'), error => /private, quarantined, or NSFW/.test(error.message));
   const parsing = client();
   assert.equal(parsing.getRetryAfterDelay(new Response('', { headers: { 'retry-after': 'invalid' } })), null);

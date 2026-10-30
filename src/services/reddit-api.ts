@@ -217,12 +217,13 @@ export class RedditAPI {
             this.anonJsonBlockedUntil = Date.now() + this.ANON_JSON_BLOCK_TTL_MS;
           }
         } catch (rssError) {
-          // Surface both failures so the cause is clear
-          throw new Error(
+          // Surface both failures so the cause is clear; the RSS status is the one the caller can act on
+          const message =
             `Both the JSON API and the RSS fallback failed for r/${subreddit}. ` +
             `API: ${error instanceof Error ? error.message : error}. ` +
-            `RSS: ${rssError instanceof Error ? rssError.message : rssError}`
-          );
+            `RSS: ${rssError instanceof Error ? rssError.message : rssError}`;
+          const rssStatus = (rssError as { status?: number }).status;
+          throw rssStatus ? this.httpError(message, rssStatus) : new Error(message);
         }
       }
     }
