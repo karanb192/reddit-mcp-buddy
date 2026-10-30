@@ -2438,6 +2438,7 @@ ANON_403_RESULT=$(HOME="$(mktemp -d)" USERPROFILE="$(mktemp -d)" node --input-ty
 assert "Logged-out 403 asks for credentials, then fails fast without a request" "[ \"$ANON_403_RESULT\" = \"pass\" ]"
 assert "API retries return long waits immediately and preserve transient recovery" "node tests/api-access-unit.mjs"
 assert "OAuth refresh auth: grants, scopes, credential isolation, and redacted failures" "node tests/auth-refresh-unit.mjs"
+assert "OAuth consent CLI: loopback callback, state check, code exchange, scopes, and token file" "node tests/oauth-consent-unit.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

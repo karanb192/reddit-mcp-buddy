@@ -11,6 +11,9 @@ import { spawn } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join } from 'path';
 import readline from 'readline/promises';
+import { Writable } from 'stream';
+import { existsSync } from 'fs';
+import { parseOAuthArgs, parseLoopbackRedirect, runOAuthConsent, scopesFor, writeTokenFile } from './core/oauth-consent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -215,6 +218,94 @@ async function setupAuth() {
   }
 }
 
+// readline echoes typed input through its output stream; muting that stream
+// after the prompt is written keeps the secret out of the terminal scrollback.
+async function promptHidden(question: string): Promise<string> {
+  let muted = false;
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      if (!muted) process.stdout.write(chunk);
+      callback();
+    },
+  });
+  const rl = readline.createInterface({ input: process.stdin, output, terminal: !!process.stdin.isTTY });
+  try {
+    const answer = rl.question(question);
+    muted = true;
+    return await answer;
+  } finally {
+    rl.close();
+    process.stdout.write('\n');
+  }
+}
+
+async function setupOAuth(argv: string[]) {
+  const options = parseOAuthArgs(argv);
+  parseLoopbackRedirect(options.redirectUri);
+  if (options.out && existsSync(options.out)) {
+    throw new Error(`${options.out} already exists. Choose a new path for --out; it is never overwritten.`);
+  }
+  const scopes = scopesFor(options.write);
+
+  console.log('\n🔐 Reddit MCP Buddy OAuth Setup\n');
+  console.log('This authorizes an approved Reddit web app to act for your account and prints a refresh token.');
+  console.log('It needs a "web app" whose redirect URI is exactly: ' + options.redirectUri);
+  console.log('Consent does not grant Reddit API approval or extend your approved use case.\n');
+
+  let clientId = process.env.REDDIT_CLIENT_ID?.trim();
+  let clientSecret = process.env.REDDIT_CLIENT_SECRET?.trim();
+  if (!clientId) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      clientId = (await rl.question('Enter your web app Client ID: ')).trim();
+    } finally {
+      rl.close();
+    }
+  }
+  if (!clientSecret) {
+    clientSecret = (await promptHidden('Enter your web app Client Secret: ')).trim();
+  }
+  if (!clientId || !clientSecret) {
+    throw new Error('A client ID and client secret are required.');
+  }
+
+  const result = await runOAuthConsent({
+    clientId,
+    clientSecret,
+    scopes,
+    redirectUri: options.redirectUri,
+    onAuthorizeUrl: url => {
+      console.log(`Requesting scopes: ${scopes.join(' ')}`);
+      console.log('Open this link in a browser where you are signed in to Reddit, then click Allow:\n');
+      console.log(url + '\n');
+      console.log('Waiting up to 5 minutes for Reddit to redirect back...');
+    },
+  });
+
+  console.log(`\n✅ Authorized as u/${result.username} with scopes: ${result.scopes.join(' ')}`);
+  let saved = false;
+  if (options.out) {
+    try {
+      await writeTokenFile(options.out, result.refreshToken);
+      saved = true;
+      console.log(`Refresh token saved to ${options.out} (owner-only on macOS and Linux).`);
+    } catch (error) {
+      // Reddit has already issued the token; losing it here would force a new consent.
+      console.error(`\n⚠️ Could not write ${options.out}: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
+  }
+  if (!saved) {
+    console.log('Add this to the server environment. Treat it like a password:\n');
+    console.log(`REDDIT_REFRESH_TOKEN=${result.refreshToken}\n`);
+  }
+  console.log('Keep REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET set, and leave REDDIT_PASSWORD unset.');
+  if (options.write) {
+    console.log('Posting also needs REDDIT_BUDDY_WRITE=true and stdio transport.');
+  }
+  console.log('Revoke access any time under "authorized apps" at https://www.reddit.com/prefs/apps');
+}
+
 async function startServer() {
   // Check if running in development
   const isDev = process.env.NODE_ENV === 'development';
@@ -303,7 +394,12 @@ async function startServer() {
 // Parse command line arguments
 const args = process.argv.slice(2);
 
-if (args.includes('--auth') || args.includes('-a')) {
+if (args.includes('--oauth')) {
+  setupOAuth(args).catch((error) => {
+    console.error('\n❌ OAuth setup failed:', error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else if (args.includes('--auth') || args.includes('-a')) {
   // Run authentication setup
   setupAuth().catch((error) => {
     console.error('Setup failed:', error);
@@ -315,6 +411,7 @@ if (args.includes('--auth') || args.includes('-a')) {
   console.log('  reddit-mcp-buddy           Start the MCP server (stdio mode)');
   console.log('  reddit-mcp-buddy --http    Start the MCP server (HTTP mode)');
   console.log('  reddit-mcp-buddy --auth    Set up Reddit authentication (optional)');
+  console.log('  reddit-mcp-buddy --oauth   Get a refresh token for an approved web app (--write adds posting scopes)');
   console.log('  reddit-mcp-buddy --help    Show this help message\n');
   console.log('Features:');
   console.log('  • Browse subreddits with smart summaries');
