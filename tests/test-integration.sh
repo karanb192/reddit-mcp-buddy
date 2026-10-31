@@ -161,11 +161,27 @@ is_throttled() {
   echo "$1" | grep -qE '429|[Rr]ate.limit|rate-limited|Both the JSON API and the RSS fallback failed|whoa there'
 }
 
+# Reddit can refuse a logged-out aggregate feed (r/all, r/popular) for the
+# runner's IP. That is Reddit policy, not a server regression, so the
+# aggregate checks skip it, but only for the exact feed they requested.
+assert_aggregate_live() {
+  local description="$1"
+  local haystack="$2"
+  local needle="$3"
+  local feed="$4"
+  if echo "$haystack" | grep -q '^{"_raw":"Error: ' && echo "$haystack" | grep -qF "refused the logged-out RSS feed for r/${feed} (HTTP 403)"; then
+    skip_test "$description" "Reddit refused the logged-out r/${feed} feed (HTTP 403)"
+  else
+    assert_contains_live "$description" "$haystack" "$needle"
+  fi
+}
+
 assert_contains_live() {
   local description="$1"
   local haystack="$2"
   local needle="$3"
-  if is_throttled "$haystack"; then
+  # A feed refusal is not throttling; only assert_aggregate_live may skip it.
+  if is_throttled "$haystack" && ! echo "$haystack" | grep -q 'refused the logged-out RSS feed'; then
     skip_test "$description" "Reddit throttled the request (HTTP 429)"
   else
     assert_contains "$description" "$haystack" "$needle"
@@ -437,7 +453,7 @@ assert_contains_live "browse_subreddit top/month: returns posts" "$BROWSE_TOP" '
 # Test 3: Special subreddit "all" with rising
 rate_limit_guard
 BROWSE_ALL=$(call_tool "browse_subreddit" '{"subreddit":"all","sort":"rising","limit":2}')
-assert_contains_live "browse_subreddit r/all rising: works" "$BROWSE_ALL" '"posts"'
+assert_aggregate_live "browse_subreddit r/all rising: works" "$BROWSE_ALL" '"posts"' "all/rising"
 
 # Test 4: NSFW filtering (default=false)
 assert_not_contains "browse_subreddit: NSFW filtered out by default" "$BROWSE_HOT" '"nsfw":true'
@@ -466,7 +482,7 @@ assert_contains_live "browse_subreddit new sort: returns posts" "$BROWSE_NEW" '"
 # Test 9: special subreddit "popular"
 rate_limit_guard
 BROWSE_POPULAR=$(call_tool "browse_subreddit" '{"subreddit":"popular","limit":2}')
-assert_contains_live "browse_subreddit r/popular: works" "$BROWSE_POPULAR" '"posts"'
+assert_aggregate_live "browse_subreddit r/popular: works" "$BROWSE_POPULAR" '"posts"' "popular/hot"
 
 # --------------------------------------------------------------------------
 # 4b. search_reddit
