@@ -14,7 +14,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import { zodToJsonSchema, JsonSchema7Type } from 'zod-to-json-schema';
 
 import { AuthManager } from './core/auth.js';
 import { CacheManager } from './core/cache.js';
@@ -43,7 +42,7 @@ export const SERVER_VERSION = '1.2.0';
 
 export const MAX_TOOL_INPUT_ELEMENTS = 1000;
 
-// Zod 3 validates every array element before it checks .max(), so oversized arguments are refused before tool schema validation.
+// The low-level Server has no maxToolInputElements option, so oversized arguments are refused here before tool schema validation.
 function exceedsElementLimit(value: unknown): boolean {
   let count = 0;
   const stack: unknown[] = [value];
@@ -89,26 +88,11 @@ type ToolResultResponse = z.infer<typeof ToolResultResponseSchema>;
  * Convert Zod schema to MCP-compatible JSON Schema with proper typing
  * Ensures the output is valid for MCP tool definitions
  */
-function zodSchemaToMCPInputSchema(schema: z.ZodTypeAny, schemaName: string): Tool['inputSchema'] {
+function zodSchemaToMCPInputSchema(schema: z.ZodType, schemaName: string): Tool['inputSchema'] {
   try {
-    const jsonSchema = zodToJsonSchema(schema, {
-      name: schemaName,
-      target: 'jsonSchema7',
-      $refStrategy: 'none', // Inline all refs for MCP compatibility
-    }) as JsonSchema7Type & { properties?: Record<string, unknown> };
-
-    // Validate that the schema has required properties for MCP
-    if (typeof jsonSchema !== 'object' || jsonSchema === null) {
-      throw new Error(`Invalid schema output for ${schemaName}`);
-    }
-
-    // MCP expects an object schema with properties
-    // Extract the inner schema if zodToJsonSchema wrapped it
-    if ('definitions' in jsonSchema && schemaName in (jsonSchema as any).definitions) {
-      return (jsonSchema as any).definitions[schemaName] as Tool['inputSchema'];
-    }
-
-    return jsonSchema as Tool['inputSchema'];
+    // io: 'input' keeps fields with defaults optional; it leaves additionalProperties open, so close it as before.
+    const { $schema: _ignored, ...jsonSchema } = z.toJSONSchema(schema, { target: 'draft-7', io: 'input' });
+    return { ...jsonSchema, additionalProperties: false } as Tool['inputSchema'];
   } catch (error) {
     console.error(`Failed to convert schema ${schemaName}:`, error);
     // Return a minimal valid schema as fallback
@@ -140,7 +124,7 @@ function createValidatedResponse(text: string, isError: boolean = false): ToolRe
   } catch (error) {
     if (error instanceof z.ZodError) {
       // If validation fails, return a safe error response
-      console.error('MCP response validation failed:', error.errors);
+      console.error('MCP response validation failed:', error.issues);
       return {
         content: [
           {

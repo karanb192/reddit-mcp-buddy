@@ -54,7 +54,6 @@ reddit-mcp-buddy/
 npm run dev           # Run with hot reload
 npm run build         # Build TypeScript
 npm run typecheck     # Type checking
-npm run lint          # Run ESLint
 
 # Testing
 npm run test:rate-limit         # Test rate limiting

@@ -330,7 +330,7 @@ export class AuthManager {
         data = OAuthTokenResponseSchema.parse(rawData);
       } catch (validationError) {
         if (validationError instanceof z.ZodError) {
-          const issues = validationError.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+          const issues = validationError.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
           throw new Error(`Invalid OAuth token response format: ${issues}`);
         }
         throw new Error('Failed to validate OAuth token response');

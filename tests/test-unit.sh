@@ -1838,7 +1838,7 @@ WRITEVAL_RESULT=$(node --input-type=module -e '
 
   const sub = writeSubredditName("d");
   const ok = (v) => sub.safeParse(v).success;
-  const err = (v) => { const r = sub.safeParse(v); return r.success ? "" : r.error.errors[0].message; };
+  const err = (v) => { const r = sub.safeParse(v); return r.success ? "" : r.error.issues[0].message; };
 
   // t1: STRICT validator accepts one real sub / u_ profile, strips r/ prefix
   const t1 = ok("test") && ok("MachineLearning") && ok("u_some-user") && sub.parse("r/Test") === "Test";
