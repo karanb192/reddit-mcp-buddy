@@ -7,7 +7,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   CallToolRequestSchema,
+  ErrorCode,
   ListToolsRequestSchema,
+  McpError,
   Tool
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
@@ -38,6 +40,23 @@ import {
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
 export const SERVER_VERSION = '1.2.0';
+
+export const MAX_TOOL_INPUT_ELEMENTS = 1000;
+
+// Zod 3 validates every array element before it checks .max(), so oversized arguments are refused before parsing.
+function exceedsElementLimit(value: unknown): boolean {
+  let count = 0;
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== 'object') continue;
+    for (const child of Array.isArray(node) ? node : Object.values(node)) {
+      if (++count > MAX_TOOL_INPUT_ELEMENTS) return true;
+      stack.push(child);
+    }
+  }
+  return false;
+}
 
 // MCP Response validation schemas (per MCP spec)
 const ContentBlockSchema = z.object({
@@ -497,6 +516,10 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
   // Register handlers with the MCP server
   server.setRequestHandler(ListToolsRequestSchema, handlers['tools/list']);
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (exceedsElementLimit(request.params.arguments)) {
+      throw new McpError(ErrorCode.InvalidParams,
+        `Invalid arguments for tool ${request.params.name}: more than ${MAX_TOOL_INPUT_ELEMENTS} array elements and object keys`);
+    }
     return handlers['tools/call'](request.params);
   });
   

@@ -2439,6 +2439,7 @@ assert "Logged-out 403 asks for credentials, then fails fast without a request" 
 assert "API retries return long waits immediately and preserve transient recovery" "node tests/api-access-unit.mjs"
 assert "OAuth refresh auth: grants, scopes, credential isolation, and redacted failures" "node tests/auth-refresh-unit.mjs"
 assert "OAuth consent CLI: loopback callback, state check, code exchange, scopes, and token file" "node tests/oauth-consent-unit.mjs"
+assert "Tool input: calls over 1000 array elements and object keys are refused before validation" "node tests/tool-input-unit.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS
