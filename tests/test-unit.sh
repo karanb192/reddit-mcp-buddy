@@ -397,11 +397,12 @@ CACHE_KEY_RESULT=$(node --input-type=module -e "
 
   // Test special characters sanitized to underscores
   const k3 = CacheManager.createKey('search', 'machine learning');
-  const test3 = /^search:machine_learning_[0-9a-f]{16}\$/.test(k3) && k3 !== CacheManager.createKey('search', 'machine_learning');
+  const test3 = /^search:machine_learning~[0-9a-f]{16}\$/.test(k3) && k3 !== CacheManager.createKey('search', 'machine_learning')
+    && k3 !== CacheManager.createKey('search', k3.slice('search:'.length));
 
   // Test with special chars
   const k4 = CacheManager.createKey('search', 'what is AI?');
-  const test4 = /^search:what_is_ai__[0-9a-f]{16}\$/.test(k4);
+  const test4 = /^search:what_is_ai_~[0-9a-f]{16}\$/.test(k4);
 
   // Test undefined values filtered out
   const k5 = CacheManager.createKey('user', 'spez', undefined, 'new');

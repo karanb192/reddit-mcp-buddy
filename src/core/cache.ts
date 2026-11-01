@@ -220,8 +220,8 @@ export class CacheManager {
         throw new Error('Cache key parts cannot be empty strings');
       }
       const sanitized = str.replace(/[^a-z0-9_-]/g, '_');
-      // A hash of the original keeps "machine learning" and "machine_learning" apart; clean parts stay readable for prefix deletes.
-      return sanitized === str ? str : `${sanitized}_${shortHash(str)}`;
+      // Clean parts never contain "~", so a hashed part cannot equal any clean part; clean parts stay readable for prefix deletes.
+      return sanitized === str ? str : `${sanitized}~${shortHash(str)}`;
     });
 
     // Join with colons
@@ -229,7 +229,7 @@ export class CacheManager {
 
     // Truncate if too long (max 256 chars) - use hash suffix for uniqueness
     if (key.length > 256) {
-      key = key.substring(0, 239) + '_' + shortHash(key);
+      key = key.substring(0, 239) + '#' + shortHash(key);
     }
 
     return key;

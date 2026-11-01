@@ -34,6 +34,8 @@ try {
     body,
   }).catch(error => ({ status: error.cause?.code ?? 'error' }));
   assert.ok(response.status === 413 || response.status === 'ECONNRESET' || response.status === 'EPIPE', `expected 413, got ${response.status}`);
+  assert.equal(server.exitCode, null, 'the server must survive an oversized body');
+  assert.equal((await fetch('http://127.0.0.1:38431/health')).status, 200);
   console.log('SECURITY: pass');
 } finally {
   server.kill();
