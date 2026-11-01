@@ -407,7 +407,7 @@ const confirm = { elicit: async () => 'confirmed' };
 {
   const sub = writeSubredditName('test');
   const ok = (v) => sub.safeParse(v).success;
-  const msg = (v) => { const r = sub.safeParse(v); return r.success ? '' : r.error.errors[0].message; };
+  const msg = (v) => { const r = sub.safeParse(v); return r.success ? '' : r.error.issues[0].message; };
 
   t('C1 real subreddits and u_ profiles accepted', ok('test') && ok('MachineLearning') && ok('ab') && ok('a'.repeat(21)) && ok('u_some-user') && ok('u_' + 'n'.repeat(20)));
   t('C2 r/ prefix and whitespace normalized away', sub.parse(' r/Test ') === 'Test' && sub.parse('/r/other') === 'other');

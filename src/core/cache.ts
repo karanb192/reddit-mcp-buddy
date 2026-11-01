@@ -2,6 +2,12 @@
  * Smart in-memory cache with LRU eviction and adaptive TTL
  */
 
+import { createHash } from 'crypto';
+
+function shortHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -213,9 +219,9 @@ export class CacheManager {
       if (str.length === 0) {
         throw new Error('Cache key parts cannot be empty strings');
       }
-      // Sanitize: replace invalid characters with underscores
-      // This allows search queries like "machine learning" or "what is AI?" to work
-      return str.replace(/[^a-z0-9_-]/g, '_');
+      const sanitized = str.replace(/[^a-z0-9_-]/g, '_');
+      // Clean parts never contain "~", so a hashed part cannot equal any clean part; clean parts stay readable for prefix deletes.
+      return sanitized === str ? str : `${sanitized}~${shortHash(str)}`;
     });
 
     // Join with colons
@@ -223,11 +229,7 @@ export class CacheManager {
 
     // Truncate if too long (max 256 chars) - use hash suffix for uniqueness
     if (key.length > 256) {
-      // Simple hash to preserve uniqueness when truncating
-      const hash = key.split('').reduce((acc, char) => {
-        return ((acc << 5) - acc + char.charCodeAt(0)) | 0;
-      }, 0).toString(36);
-      key = key.substring(0, 245) + '_' + hash;
+      key = key.substring(0, 239) + '#' + shortHash(key);
     }
 
     return key;

@@ -197,10 +197,10 @@ deploy_docker() {
     echo "🏃 Starting Docker container..."
     docker run -d \
         --name $CONTAINER_NAME \
-        -p $PORT:3000 \
+        -p 127.0.0.1:$PORT:3000 \
         -e REDDIT_BUDDY_HTTP=true \
         --restart unless-stopped \
-        --health-cmd="curl -f http://localhost:3000/health || exit 1" \
+        --health-cmd="node -e \"fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))\"" \
         --health-interval=30s \
         --health-timeout=10s \
         --health-retries=3 \

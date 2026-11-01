@@ -690,9 +690,6 @@ npm run test:rate-limit:anon  # Test anonymous mode (10 rpm)
 npm run test:rate-limit:app   # Test app-only mode (60 rpm)
 npm run test:rate-limit:auth  # Test authenticated mode (100 rpm)
 
-# Lint
-npm run lint
-
 # Type check
 npm run typecheck
 ```

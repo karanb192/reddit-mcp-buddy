@@ -6,8 +6,8 @@ Only the latest published version receives security fixes.
 
 | Version | Supported |
 |---------|-----------|
-| 1.1.x (latest) | ✅ |
-| < 1.1.0 | ❌ |
+| Latest release on npm | ✅ |
+| Older releases | ❌ |
 
 ## Reporting a Vulnerability
 

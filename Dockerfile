@@ -21,7 +21,6 @@ FROM node:26-slim
 # Install dumb-init for proper signal handling and update certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dumb-init \
-    curl \
     ca-certificates \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -38,14 +37,13 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/README.md ./
 COPY --from=builder /app/LICENSE ./
 
-# Create non-root user
-RUN useradd -m -d /app -s /bin/bash appuser && \
-    chown -R appuser:appuser /app
+# Run as a non-root user that cannot modify the installed application
+RUN useradd -M -d /app -s /usr/sbin/nologin appuser
 USER appuser
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD node -e "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
 
 # Expose port
 EXPOSE 3000

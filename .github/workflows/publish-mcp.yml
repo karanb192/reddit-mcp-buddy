@@ -18,10 +18,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
           registry-url: "https://registry.npmjs.org"
@@ -64,7 +66,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v0.1.15
         with:
           name: Release ${{ steps.get_version.outputs.VERSION }}
           draft: false
@@ -77,20 +79,18 @@ jobs:
 
       - name: Install MCP Publisher
         run: |
-          echo "📥 Downloading MCP Publisher v${{ env.MCP_PUBLISHER_VERSION }}..."
-          # Release assets dropped the version from their filename after 1.2.0
-          curl -fL "https://github.com/modelcontextprotocol/registry/releases/download/v${{ env.MCP_PUBLISHER_VERSION }}/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" -o mcp-publisher.tar.gz
-
-          echo "📦 Extracting..."
+          ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+          case "$ARCH" in
+            amd64) SHA256=1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf ;;
+            arm64) SHA256=c978982c60e1b4903a976de090f04dc4fac4a320daa50704fcad2dbc93433d62 ;;
+            *) echo "::error::No pinned mcp-publisher checksum for $ARCH"; exit 1 ;;
+          esac
+          curl -fL "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_${ARCH}.tar.gz" -o mcp-publisher.tar.gz
+          # The checksums belong to MCP_PUBLISHER_VERSION; update both together.
+          echo "${SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
           tar xzf mcp-publisher.tar.gz
-
-          echo "✅ Verifying installation..."
-          if [ ! -f "./mcp-publisher" ]; then
-            echo "::error::MCP Publisher binary not found after extraction"
-            exit 1
-          fi
           chmod +x ./mcp-publisher
-          ./mcp-publisher --version || echo "Version check failed, continuing..."
+          ./mcp-publisher --version
 
       # `login github-oidc` only accepts -registry; the --audience flag added in
       # #54 does not exist in any published mcp-publisher, which is why every

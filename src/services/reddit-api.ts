@@ -1217,9 +1217,10 @@ export class RedditAPI {
           throw this.httpError('Access forbidden - the requested content may be private or restricted', 403);
         }
 
+        // The upstream body is untrusted and can be a whole HTML page, so only a short plain-text excerpt reaches the model.
         let errorText = '';
         try {
-          errorText = await response.text();
+          errorText = (await response.text()).slice(0, 2000).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
         } catch {
           errorText = 'Unable to read error response';
         }
