@@ -236,6 +236,8 @@ const PREVIEW_CAP = 200;
 // evaluated safely degrades to a warning, never a block and never a hang.
 const TITLE_REGEX_MAX_COUNT = 10;
 const TITLE_REGEX_MAX_LENGTH = 1000;
+// Subreddit rule text is moderator-authored; errors quote only a short excerpt of it.
+const MOD_TEXT_ECHO_MAX = 100;
 const TITLE_REGEX_TIMEOUT_MS = 100;
 
 /** true/false = the regex ran to completion; null = it hit the deadline. */
@@ -744,7 +746,7 @@ export class RedditWriteTools {
     const banned = Array.isArray(req.title_blacklisted_strings) ? req.title_blacklisted_strings : [];
     for (const s of banned) {
       if (typeof s === 'string' && s && lower.includes(s.toLowerCase())) {
-        throw new Error(`r/${sub} bans "${s}" in titles; reword the title.`);
+        throw new Error(`r/${sub} bans "${s.slice(0, MOD_TEXT_ECHO_MAX)}" in titles; reword the title.`);
       }
     }
 
@@ -753,7 +755,7 @@ export class RedditWriteTools {
     const required = (Array.isArray(req.title_required_strings) ? req.title_required_strings : [])
       .filter((s): s is string => typeof s === 'string' && s.length > 0);
     if (required.length > 0 && !required.some(s => lower.includes(s.toLowerCase()))) {
-      throw new Error(`r/${sub} requires the title to include one of: ${required.map(s => `"${s}"`).join(', ')}.`);
+      throw new Error(`r/${sub} requires the title to include one of: ${required.map(s => `"${s.slice(0, MOD_TEXT_ECHO_MAX)}"`).join(', ')}.`);
     }
 
     const warnings: string[] = [];
@@ -779,7 +781,7 @@ export class RedditWriteTools {
         continue;
       }
       if (!matched) {
-        throw new Error(`r/${sub} requires titles to match: ${pattern}`);
+        throw new Error(`r/${sub} requires titles to match: ${pattern.slice(0, MOD_TEXT_ECHO_MAX)}`);
       }
     }
     return warnings;

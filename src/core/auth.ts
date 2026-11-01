@@ -138,23 +138,17 @@ export class AuthManager {
    * Check if a string contains unresolved template patterns
    */
   private containsUnresolvedTemplate(value: string): boolean {
-    // Check for any ${...} pattern (including nested, with defaults, etc.)
-    if (/\$\{[^}]*\}/.test(value)) {
+    // Only a value made entirely of placeholders is unresolved; a real secret may contain $ or ${.
+    if (value.startsWith('${') && !value.includes('}')) {
       return true;
     }
-
-    // Check for unclosed template start: ${ without matching }
-    if (value.includes('${') && !value.includes('}')) {
-      return true;
+    let rest = value;
+    for (let previous = ''; previous !== rest;) {
+      previous = rest;
+      rest = rest.replace(/\$\{[^{}]*\}/g, '');
     }
-
-    // Check for orphaned template syntax that looks like unresolved vars
-    // e.g., "$REDDIT_CLIENT_ID" without braces (common in some configs)
-    if (/\$[A-Z_][A-Z0-9_]*/.test(value)) {
-      return true;
-    }
-
-    return false;
+    rest = rest.replace(/\$[A-Z_][A-Z0-9_]*/g, '');
+    return rest.length === 0 && value.length > 0;
   }
 
   /**

@@ -40,9 +40,16 @@ async function setupAuth() {
   console.log('  • Client ID: Look under "personal use script" (e.g., XaBcDeFgHiJkLm)');
   console.log('  • Client Secret: The secret string shown on the app page\n');
 
+  let muteInput = false;
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout,
+    output: new Writable({
+      write(chunk, _encoding, callback) {
+        if (!muteInput) process.stdout.write(chunk);
+        callback();
+      },
+    }),
+    terminal: !!process.stdin.isTTY,
   });
 
   try {
@@ -55,7 +62,11 @@ async function setupAuth() {
       process.exit(1);
     }
 
-    const clientSecret = await rl.question('Enter your Client Secret: ');
+    const secretAnswer = rl.question('Enter your Client Secret: ');
+    muteInput = true;
+    const clientSecret = await secretAnswer;
+    muteInput = false;
+    process.stdout.write('\n');
 
     // Validate Client Secret
     if (!clientSecret || clientSecret.length < 20) {

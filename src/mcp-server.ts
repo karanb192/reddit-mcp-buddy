@@ -650,7 +650,8 @@ export async function startHttpServer(port: number = 3000) {
     if (req.url === '/mcp') {
       // Parse body for POST requests
       if (req.method === 'POST') {
-        let body = '';
+        const chunks: Buffer[] = [];
+        let received = 0;
         const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
         const DATA_TIMEOUT_MS = 30000; // 30 second timeout for receiving data
 
@@ -670,7 +671,8 @@ export async function startHttpServer(port: number = 3000) {
 
         req.on('data', chunk => {
           // Check size limit before appending
-          if (body.length + chunk.length > MAX_BODY_SIZE) {
+          received += chunk.length;
+          if (received > MAX_BODY_SIZE) {
             clearTimeout(dataTimeoutId);
             res.writeHead(413, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
@@ -684,13 +686,13 @@ export async function startHttpServer(port: number = 3000) {
             req.destroy();
             return;
           }
-          body += chunk.toString();
+          chunks.push(chunk);
         });
 
         req.on('end', async () => {
           clearTimeout(dataTimeoutId);
           try {
-            const parsedBody = JSON.parse(body);
+            const parsedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
             // Fresh Server + transport per request. Sharing one stateless
             // transport across clients causes cross-client response
             // misrouting (GHSA-345p-7cg4-v4c7), and a client closing it

@@ -283,27 +283,26 @@ ENV_CLEAN_RESULT=$(node --input-type=module -e "
 assert "cleanEnvVar: empty strings treated as undefined" "echo '$ENV_CLEAN_RESULT' | grep -q 'pass'"
 
 TEMPLATE_RESULT=$(node --input-type=module -e '
-  // Test the containsUnresolvedTemplate logic directly
-  function containsUnresolvedTemplate(value) {
-    if (/\$\{[^}]*\}/.test(value)) return true;
-    if (value.includes("${") && !value.includes("}")) return true;
-    if (/\$[A-Z_][A-Z0-9_]*/.test(value)) return true;
-    return false;
-  }
+  import { AuthManager } from "./dist/core/auth.js";
+  const am = new AuthManager();
+  const unresolved = value => am.containsUnresolvedTemplate(value);
   const tests = [
-    containsUnresolvedTemplate("${VAR}") === true,
-    containsUnresolvedTemplate("${VAR:-default}") === true,
-    containsUnresolvedTemplate("${${VAR}}") === true,
-    containsUnresolvedTemplate("${") === true,
-    containsUnresolvedTemplate("$REDDIT_CLIENT_ID") === true,
-    containsUnresolvedTemplate("${AONE}${BTWO}") === true,
-    containsUnresolvedTemplate("actual_value_123") === false,
-    containsUnresolvedTemplate("XaBcDeFgHiJkLm") === false,
-    containsUnresolvedTemplate("") === false,
+    unresolved("${VAR}") === true,
+    unresolved("${VAR:-default}") === true,
+    unresolved("${${VAR}}") === true,
+    unresolved("${") === true,
+    unresolved("$REDDIT_CLIENT_ID") === true,
+    unresolved("${AONE}${BTWO}") === true,
+    unresolved("actual_value_123") === false,
+    unresolved("XaBcDeFgHiJkLm") === false,
+    unresolved("") === false,
+    unresolved("hunter2$ABC") === false,
+    unresolved("pa${ss") === false,
+    unresolved("x${VAR}y") === false,
   ];
-  console.log(tests.every(Boolean) ? "pass" : "fail");
+  console.log(tests.every(Boolean) ? "pass" : "fail:" + JSON.stringify(tests));
 ' 2>/dev/null)
-assert "containsUnresolvedTemplate detects all template patterns" "[ '$TEMPLATE_RESULT' = 'pass' ]"
+assert "containsUnresolvedTemplate: placeholder-only values are unresolved, secrets containing \$ are kept" "[ '$TEMPLATE_RESULT' = 'pass' ]"
 
 # --------------------------------------------------------------------------
 # 2d. Auth: Rate Limit Tiers (EXISTING)
@@ -398,11 +397,11 @@ CACHE_KEY_RESULT=$(node --input-type=module -e "
 
   // Test special characters sanitized to underscores
   const k3 = CacheManager.createKey('search', 'machine learning');
-  const test3 = k3 === 'search:machine_learning';
+  const test3 = /^search:machine_learning_[0-9a-f]{16}\$/.test(k3) && k3 !== CacheManager.createKey('search', 'machine_learning');
 
   // Test with special chars
   const k4 = CacheManager.createKey('search', 'what is AI?');
-  const test4 = k4 === 'search:what_is_ai_';
+  const test4 = /^search:what_is_ai__[0-9a-f]{16}\$/.test(k4);
 
   // Test undefined values filtered out
   const k5 = CacheManager.createKey('user', 'spez', undefined, 'new');
@@ -415,11 +414,11 @@ CACHE_KEY_RESULT=$(node --input-type=module -e "
   // Test long key truncation (> 256 chars)
   const longPart = 'a'.repeat(300);
   const k7 = CacheManager.createKey('test', longPart);
-  const test7 = k7.length <= 256;
+  const test7 = k7.length <= 256 && k7 !== CacheManager.createKey('test', 'a'.repeat(299) + 'b');
 
   console.log((test1&&test2&&test3&&test4&&test5&&test6&&test7) ? 'pass' : 'fail');
 " 2>/dev/null)
-assert "Cache keys: sanitization, undefined filtering, truncation, empty rejection" "[ '$CACHE_KEY_RESULT' = 'pass' ]"
+assert "Cache keys: distinct queries never collide, undefined filtering, truncation, empty rejection" "[ '$CACHE_KEY_RESULT' = 'pass' ]"
 
 # --------------------------------------------------------------------------
 # 2g. Cache: Core Operations + expiresAt (NEW) + has() (NEW) + oversized skip (NEW)
@@ -2440,6 +2439,7 @@ assert "API retries return long waits immediately and preserve transient recover
 assert "OAuth refresh auth: grants, scopes, credential isolation, and redacted failures" "node tests/auth-refresh-unit.mjs"
 assert "OAuth consent CLI: loopback callback, state check, code exchange, scopes, and token file" "node tests/oauth-consent-unit.mjs"
 assert "Tool input: calls over 1000 array elements and object keys are refused before validation" "node tests/tool-input-unit.mjs"
+assert "Security: HTTP body limit counts bytes, upstream error text is capped" "node tests/security-unit.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS
