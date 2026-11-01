@@ -13,6 +13,8 @@ const client = new Client({ name: 'tool-input-unit', version: '1.0.0' });
 const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
 try {
   await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+  const explain = await client.callTool({ name: 'reddit_explain', arguments: { term: 'karma' } });
+  assert.notEqual(explain.isError, true, 'an ordinary call must still succeed');
   // { query, subreddits: [n] } counts n + 2: the two keys plus each element.
   const call = n => client.callTool({ name: 'search_reddit', arguments: { query: 'x', subreddits: Array(n).fill('a') } });
   const atLimit = await call(MAX_TOOL_INPUT_ELEMENTS - 2);
@@ -21,6 +23,8 @@ try {
   await assert.rejects(call(100000), error => error.code === -32602);
   const nested = { query: 'x', subreddits: [[[Array(MAX_TOOL_INPUT_ELEMENTS).fill(1)]]] };
   await assert.rejects(client.callTool({ name: 'search_reddit', arguments: nested }), error => error.code === -32602);
+  const wide = Object.fromEntries(Array.from({ length: MAX_TOOL_INPUT_ELEMENTS + 1 }, (_, i) => ['k' + i, 1]));
+  await assert.rejects(client.callTool({ name: 'search_reddit', arguments: wide }), error => error.code === -32602);
   console.log('TOOL-INPUT: pass');
 } finally {
   await client.close();

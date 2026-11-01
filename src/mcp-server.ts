@@ -43,16 +43,24 @@ export const SERVER_VERSION = '1.2.0';
 
 export const MAX_TOOL_INPUT_ELEMENTS = 1000;
 
-// Zod 3 validates every array element before it checks .max(), so oversized arguments are refused before parsing.
+// Zod 3 validates every array element before it checks .max(), so oversized arguments are refused before tool schema validation.
 function exceedsElementLimit(value: unknown): boolean {
   let count = 0;
   const stack: unknown[] = [value];
   while (stack.length > 0) {
     const node = stack.pop();
     if (node === null || typeof node !== 'object') continue;
-    for (const child of Array.isArray(node) ? node : Object.values(node)) {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        if (++count > MAX_TOOL_INPUT_ELEMENTS) return true;
+        stack.push(child);
+      }
+      continue;
+    }
+    for (const key in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
       if (++count > MAX_TOOL_INPUT_ELEMENTS) return true;
-      stack.push(child);
+      stack.push((node as Record<string, unknown>)[key]);
     }
   }
   return false;
