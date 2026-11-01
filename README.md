@@ -698,7 +698,7 @@ npm run typecheck
 ```
 
 ### Requirements
-- Node.js >= 18.0.0
+- Node.js >= 20.0.0
 - npm or yarn
 - TypeScript 5.5+
 
