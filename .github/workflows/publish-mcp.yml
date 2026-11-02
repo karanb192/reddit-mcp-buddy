@@ -99,6 +99,21 @@ jobs:
       - name: Login to MCP Registry
         run: ./mcp-publisher login github-oidc
 
+      # npm accepts a publish before it serves the version, and the registry rejects a version npm cannot find yet.
+      - name: Wait for npm to serve this version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          for attempt in $(seq 1 20); do
+            if curl -fs --max-time 20 "https://registry.npmjs.org/reddit-mcp-buddy/$VERSION" > /dev/null; then
+              echo "npm serves reddit-mcp-buddy@$VERSION"
+              exit 0
+            fi
+            echo "npm does not serve $VERSION yet (attempt $attempt/20)"
+            sleep 15
+          done
+          echo "::error::npm still does not serve reddit-mcp-buddy@$VERSION after 20 attempts"
+          exit 1
+
       - name: Publish to MCP Registry
         run: |
           echo "📤 Publishing to MCP Registry..."
@@ -114,38 +129,17 @@ jobs:
 
       - name: Verify Registry Publishing
         run: |
-          echo "⏳ Waiting 30 seconds for registry to update..."
-          sleep 30
-
-          # Get the version we just published from package.json
           PUBLISHED_VERSION=$(node -p "require('./package.json').version")
-          echo "📦 Expected version: $PUBLISHED_VERSION"
-
-          echo "🔍 Verifying server appears in MCP registry with correct version..."
-          RESPONSE=$(curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.karanb192/reddit-mcp-buddy")
-
-          # Check if our server is in the response
-          if echo "$RESPONSE" | grep -q '"name":"io.github.karanb192/reddit-mcp-buddy"'; then
-            echo "✅ Server found in registry, checking version..."
-
-            # Extract the latest version from the response
-            LATEST_VERSION=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); servers = data.get('servers', []); [print(server.get('server', {}).get('version', 'unknown')) for server in servers if server.get('_meta', {}).get('io.modelcontextprotocol.registry/official', {}).get('isLatest')]" | head -1)
-
-            echo "🔍 Latest version in registry: $LATEST_VERSION"
-
+          for attempt in $(seq 1 20); do
+            RESPONSE=$(curl -fsS --max-time 20 "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.karanb192/reddit-mcp-buddy" || echo '{}')
+            LATEST_VERSION=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(s.get('server', {}).get('version', 'unknown')) for s in data.get('servers', []) if s.get('server', {}).get('name') == 'io.github.karanb192/reddit-mcp-buddy' and s.get('_meta', {}).get('io.modelcontextprotocol.registry/official', {}).get('isLatest')]" | head -1)
             if [ "$LATEST_VERSION" = "$PUBLISHED_VERSION" ]; then
-              echo "✅ Success! Version $PUBLISHED_VERSION is now live in the MCP registry!"
-              echo "$RESPONSE" | python3 -m json.tool | head -40
-            else
-              echo "::error::Version mismatch! Published $PUBLISHED_VERSION but registry shows $LATEST_VERSION"
-              echo "This likely means the registry hasn't updated yet or an older version is marked as latest."
-              echo "Full registry response:"
-              echo "$RESPONSE" | python3 -m json.tool
-              exit 1
+              echo "✅ Version $PUBLISHED_VERSION is live in the MCP registry"
+              exit 0
             fi
-          else
-            echo "::error::Server not found in MCP registry after publishing"
-            echo "Registry response:"
-            echo "$RESPONSE" | python3 -m json.tool
-            exit 1
-          fi
+            echo "Registry shows ${LATEST_VERSION:-nothing} as latest, waiting for $PUBLISHED_VERSION (attempt $attempt/20)"
+            sleep 15
+          done
+          echo "::error::Registry still shows ${LATEST_VERSION:-nothing} as latest after 20 attempts; expected $PUBLISHED_VERSION"
+          echo "$RESPONSE" | python3 -m json.tool || echo "$RESPONSE"
+          exit 1
