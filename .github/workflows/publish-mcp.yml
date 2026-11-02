@@ -104,7 +104,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           for attempt in $(seq 1 20); do
-            if curl -fs "https://registry.npmjs.org/reddit-mcp-buddy/$VERSION" > /dev/null; then
+            if curl -fs --max-time 20 "https://registry.npmjs.org/reddit-mcp-buddy/$VERSION" > /dev/null; then
               echo "npm serves reddit-mcp-buddy@$VERSION"
               exit 0
             fi
@@ -131,8 +131,8 @@ jobs:
         run: |
           PUBLISHED_VERSION=$(node -p "require('./package.json').version")
           for attempt in $(seq 1 20); do
-            RESPONSE=$(curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.karanb192/reddit-mcp-buddy" || echo '{}')
-            LATEST_VERSION=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(s.get('server', {}).get('version', 'unknown')) for s in data.get('servers', []) if s.get('_meta', {}).get('io.modelcontextprotocol.registry/official', {}).get('isLatest')]" | head -1)
+            RESPONSE=$(curl -fsS --max-time 20 "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.karanb192/reddit-mcp-buddy" || echo '{}')
+            LATEST_VERSION=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(s.get('server', {}).get('version', 'unknown')) for s in data.get('servers', []) if s.get('server', {}).get('name') == 'io.github.karanb192/reddit-mcp-buddy' and s.get('_meta', {}).get('io.modelcontextprotocol.registry/official', {}).get('isLatest')]" | head -1)
             if [ "$LATEST_VERSION" = "$PUBLISHED_VERSION" ]; then
               echo "✅ Version $PUBLISHED_VERSION is live in the MCP registry"
               exit 0
