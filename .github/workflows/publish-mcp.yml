@@ -111,7 +111,7 @@ jobs:
             echo "npm does not serve $VERSION yet (attempt $attempt/20)"
             sleep 15
           done
-          echo "::error::npm still does not serve reddit-mcp-buddy@$VERSION after 5 minutes"
+          echo "::error::npm still does not serve reddit-mcp-buddy@$VERSION after 20 attempts"
           exit 1
 
       - name: Publish to MCP Registry
@@ -140,6 +140,6 @@ jobs:
             echo "Registry shows ${LATEST_VERSION:-nothing} as latest, waiting for $PUBLISHED_VERSION (attempt $attempt/20)"
             sleep 15
           done
-          echo "::error::Registry still shows ${LATEST_VERSION:-nothing} as latest after 5 minutes; expected $PUBLISHED_VERSION"
+          echo "::error::Registry still shows ${LATEST_VERSION:-nothing} as latest after 20 attempts; expected $PUBLISHED_VERSION"
           echo "$RESPONSE" | python3 -m json.tool || echo "$RESPONSE"
           exit 1
