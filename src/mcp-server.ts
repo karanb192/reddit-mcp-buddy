@@ -19,7 +19,7 @@ import { AuthManager } from './core/auth.js';
 import { CacheManager } from './core/cache.js';
 import { RateLimiter } from './core/rate-limiter.js';
 import { WriteGate } from './core/write-gate.js';
-import { RedditAPI } from './services/reddit-api.js';
+import { RedditAPI, LOGGED_OUT_ENDED_MESSAGE } from './services/reddit-api.js';
 import {
   RedditTools,
   browseSubredditSchema,
@@ -38,7 +38,7 @@ import {
 
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
-export const SERVER_VERSION = '1.2.0';
+export const SERVER_VERSION = '1.2.1';
 
 export const MAX_TOOL_INPUT_ELEMENTS = 1000;
 
@@ -255,6 +255,12 @@ export async function createSharedServices(): Promise<SharedServices> {
     cacheManager,
   });
 
+  if (redditAPI.loggedOutAccessEnded()) {
+    console.error(`⛔ No Reddit credentials configured. ${LOGGED_OUT_ENDED_MESSAGE}`);
+  } else if (!authManager.isAuthenticated()) {
+    console.error('⚠️  No Reddit credentials configured. Reddit ends logged-out RSS access on 2026-11-13; after that every Reddit tool needs existing approved Reddit API credentials (see README Authentication).');
+  }
+
   // Server-owned write state. Created ONCE per process, NEVER per request:
   // the HTTP path mints a fresh Server per request, and per-request state
   // would reset the write caps and idempotency records on every call.
@@ -345,7 +351,7 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
   const toolDefinitions: Tool[] = [
     {
       name: 'browse_subreddit',
-      description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising/controversial). Returns a post list with content, metadata, and a data_source field. With Reddit credentials (data_source "api") posts include score, num_comments, and upvote_ratio; without credentials, results come from Reddit\'s public RSS feed (data_source "rss") and those fields plus nsfw are null — see the response note and do not infer popularity from them.',
+      description: 'Fetch posts from a subreddit sorted by your choice (hot/new/top/rising/controversial). Returns a post list with content, metadata, score, num_comments, upvote_ratio, and a data_source field. Needs Reddit API credentials. If data_source is "rss" (a credential-free fallback that Reddit ends on 2026-11-13), score, num_comments, upvote_ratio, and nsfw are null: read the response note and do not infer popularity from them.',
       inputSchema: zodSchemaToMCPInputSchema(browseSubredditSchema, 'browse_subreddit'),
       annotations: { readOnlyHint: true }
     },
@@ -809,6 +815,6 @@ export async function startHttpServer(port: number = 3000) {
         console.error(`   Set REDDIT_BUDDY_ALLOWED_HOSTS (comma-separated host:port) to restrict which Host headers are accepted.`);
       }
     }
-    console.error('Approved Reddit API credentials enable additional tools and raise local caps. See README Authentication.\n');
+    console.error('Reddit tools need existing approved Reddit API credentials. See README Authentication.\n');
   });
 }

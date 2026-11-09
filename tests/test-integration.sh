@@ -169,6 +169,10 @@ assert_aggregate_live() {
   local haystack="$2"
   local needle="$3"
   local feed="$4"
+  if [ "$LOGGED_OUT_ENDED" = "1" ]; then
+    assert_logged_out_ended "$description" "$haystack"
+    return
+  fi
   if echo "$haystack" | grep -q '^{"_raw":"Error: ' && echo "$haystack" | grep -qF "refused the logged-out RSS feed for r/${feed} (HTTP 403)"; then
     skip_test "$description" "Reddit refused the logged-out r/${feed} feed (HTTP 403)"
   else
@@ -176,10 +180,20 @@ assert_aggregate_live() {
   fi
 }
 
+# Once Reddit's RSS feeds end, a logged-out server answers every Reddit call
+# with one credentials message, so the live checks assert that message instead.
+assert_logged_out_ended() {
+  assert_contains "$1 (logged out after the RSS cutoff: says credentials are needed)" "$2" "Reddit ended logged-out RSS access on 2026-11-13"
+}
+
 assert_contains_live() {
   local description="$1"
   local haystack="$2"
   local needle="$3"
+  if [ "$LOGGED_OUT_ENDED" = "1" ]; then
+    assert_logged_out_ended "$description" "$haystack"
+    return
+  fi
   # A feed refusal is not throttling; only assert_aggregate_live may skip it.
   if is_throttled "$haystack" && ! echo "$haystack" | grep -q 'refused the logged-out RSS feed'; then
     skip_test "$description" "Reddit throttled the request (HTTP 429)"
@@ -190,6 +204,8 @@ assert_contains_live() {
 
 # Rate limit aware wait
 rate_limit_guard() {
+  # No request reaches Reddit in this state, so there is no window to wait out.
+  [ "$LOGGED_OUT_ENDED" = "1" ] && return
   API_CALLS=$((API_CALLS + 1))
   API_CALLS_SINCE_WAIT=$((API_CALLS_SINCE_WAIT + 1))
 
@@ -295,6 +311,14 @@ if [ ! -f dist/index.js ]; then
 fi
 
 PKG_VERSION=$(node -p "require('./package.json').version")
+
+LOGGED_OUT_ENDED=0
+if [ "$HAS_CREDS" = "0" ]; then
+  LOGGED_OUT_ENDED=$(node --input-type=module -e 'import { LOGGED_OUT_ACCESS_ENDS_AT } from "./dist/services/reddit-api.js"; process.stdout.write(Date.now() >= LOGGED_OUT_ACCESS_ENDS_AT ? "1" : "0")')
+fi
+if [ "$LOGGED_OUT_ENDED" = "1" ]; then
+  echo -e "${YELLOW}No credentials and Reddit's logged-out RSS access has ended: live checks expect the credentials message.${NC}"
+fi
 echo -e "${BOLD}Testing reddit-mcp-buddy v${PKG_VERSION}${NC}"
 echo ""
 
@@ -757,10 +781,21 @@ log_subsection "5b. Nonexistent Resources"
 rate_limit_guard
 ERR_BAD_SUB=$(call_tool "browse_subreddit" '{"subreddit":"thisisnotarealsubreddit999xyz","limit":1}')
 assert_contains "browse_subreddit nonexistent: returns error" "$ERR_BAD_SUB" "_error\|Error\|error\|not exist\|Not found\|inaccessible"
+if [ "$LOGGED_OUT_ENDED" = "1" ]; then
+  # Valid name, so the call passes input validation; no request reaches Reddit in this state.
+  ERR_ENDED_SUB=$(call_tool "browse_subreddit" '{"subreddit":"notreal999xyz","limit":1}')
+  assert_logged_out_ended "browse_subreddit unknown subreddit" "$ERR_ENDED_SUB"
+  assert_not_contains "browse_subreddit unknown subreddit after the RSS cutoff: no misleading not-found" "$ERR_ENDED_SUB" "does not exist"
+fi
 
 rate_limit_guard
 ERR_BAD_USER=$(call_tool "user_analysis" '{"username":"thisisnotarealuser999xyzabc","posts_limit":1,"comments_limit":0}')
 assert_contains "user_analysis nonexistent user: returns error" "$ERR_BAD_USER" "_error\|Error\|error\|not found\|Not found"
+if [ "$LOGGED_OUT_ENDED" = "1" ]; then
+  ERR_ENDED_USER=$(call_tool "user_analysis" '{"username":"notreal999xyz","posts_limit":1,"comments_limit":0}')
+  assert_logged_out_ended "user_analysis unknown user" "$ERR_ENDED_USER"
+  assert_not_contains "user_analysis unknown user after the RSS cutoff: no misleading not-found" "$ERR_ENDED_USER" "not found"
+fi
 
 # Multi-subreddit search with nonexistent subreddits (Reddit search API returns empty, not 404)
 rate_limit_guard_double  # 2 parallel searches

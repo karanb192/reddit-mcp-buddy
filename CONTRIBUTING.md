@@ -107,24 +107,15 @@ node scripts/rate-limit-tester.cjs auth 120        # Test 120 requests in authen
 
 ## 🔑 Authentication Setup
 
-### Creating a Reddit App
+### Using your Reddit app
 
-First obtain explicit approval for your app and use case under Reddit's [Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy). Reddit directs developers to [Devvit](https://developers.reddit.com/) first. If it does not support your use case, use [Reddit's API access request form](https://support.reddithelp.com/hc/en-us/requests/new?tf_42139884615700=api_request_type_developer_clone&ticket_form_id=14868593862164).
+Live testing needs a Reddit app whose API access Reddit has already approved. Reddit stopped accepting new requests for public API access on 2026-10-31 ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)), and it ends RSS support on 2026-11-13 ([changelog](https://support.reddithelp.com/hc/en-us/articles/54353370049684-Changelog-October-8-2026)), so from that date the server reads nothing from Reddit without credentials. Offline unit tests (`npm test`) need no credentials.
 
-After approval, use your existing app or follow Reddit's instructions to register one. The steps below describe the app form, not a way to bypass approval.
-
-1. Go to https://www.reddit.com/prefs/apps
-2. Click "Create App" or "Create Another App"
-3. Fill in the form:
-   - Name: `reddit-mcp-buddy-dev`
-   - App type: Select **"script"**
-   - Description: `Development instance of Reddit MCP Buddy`
-   - About URL: (leave blank)
-   - Redirect URI: `http://localhost:8080` (required but not used)
-4. Click "Create app"
-5. Note your credentials:
-   - Client ID: The string under "personal use script"
+1. Go to https://www.reddit.com/prefs/apps and open your approved app
+2. Note your credentials:
+   - Client ID: The string under the app's name and type
    - Client Secret: The secret string
+3. To keep API access past 2027-01-12, the app's owner registers it at https://developers.reddit.com/app-registration ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/))
 
 ## 📝 Code Style
 

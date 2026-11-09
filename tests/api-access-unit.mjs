@@ -12,6 +12,8 @@ function client(authenticated = false) {
     authManager: { isAuthenticated: () => authenticated, getHeaders: async () => ({}) },
     rateLimiter: { canMakeRequest: () => true, recordRequest() {} },
     cacheManager: cache,
+    // These checks cover the logged-out RSS path, which only exists before Reddit's cutoff.
+    loggedOutAccessEndsAt: Infinity,
   });
 }
 

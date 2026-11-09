@@ -1,6 +1,6 @@
 {
   "name": "reddit-mcp-buddy",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "displayName": "Reddit MCP Buddy",
   "description": "Browse Reddit without leaving Claude",
   "author": "Karan Bansal",
@@ -11,9 +11,9 @@
   "dependencies": "bundled",
   "platforms": ["darwin", "linux", "win32"],
   "config": {
-    "requiresAuth": false,
+    "requiresAuth": true,
     "defaultSettings": {
-      "rateLimit": "anonymous",
+      "rateLimit": "app-only",
       "cacheEnabled": true
     }
   },
