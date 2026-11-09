@@ -1079,6 +1079,7 @@ RSS_HARDENING_RESULT=$(node --input-type=module -e '
     authManager: new AuthManager(),
     rateLimiter: new RateLimiter({ limit: 100, window: 60000, name: "test" }),
     cacheManager: new CacheManager(),
+    loggedOutAccessEndsAt: Infinity,
   });
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const entry = (id, permalink, content) => `<entry><author><name>/u/x</name></author><id>t3_${id}</id><link href="https://www.reddit.com${permalink}" /><published>2026-07-10T12:00:00+00:00</published><title>t</title><content type="html">${esc(content)}</content></entry>`;
@@ -1267,6 +1268,7 @@ CACHE_INTEGRITY_RESULT=$(node --input-type=module -e '
       authManager: new AuthManager(),
       rateLimiter: new RateLimiter({ limit: 100, window: 60000, name: "test" }),
       cacheManager: new CacheManager({ defaultTTL: 60000, maxSize: 5000000 }),
+      loggedOutAccessEndsAt: Infinity,
     });
     return new RedditTools(api);
   };
@@ -2397,6 +2399,7 @@ ANON_403_RESULT=$(HOME="$(mktemp -d)" USERPROFILE="$(mktemp -d)" node --input-ty
     authManager: auth,
     rateLimiter: new RateLimiter({ limit: 20, window: 15 * 60 * 1000, name: "anon" }),
     cacheManager: cache,
+    loggedOutAccessEndsAt: Infinity,
   });
 
   // a) the search request itself gets a 403: ask for credentials, one request
@@ -2437,6 +2440,7 @@ ANON_403_RESULT=$(HOME="$(mktemp -d)" USERPROFILE="$(mktemp -d)" node --input-ty
 ' 2>/dev/null)
 assert "Logged-out 403 asks for credentials, then fails fast without a request" "[ \"$ANON_403_RESULT\" = \"pass\" ]"
 assert "API retries return long waits immediately and preserve transient recovery" "node tests/api-access-unit.mjs"
+assert "Logged-out calls after Reddit's 2026-11-13 RSS cutoff say credentials are needed, whatever Reddit answers" "node tests/rss-shutdown-unit.mjs"
 assert "OAuth refresh auth: grants, scopes, credential isolation, and redacted failures" "node tests/auth-refresh-unit.mjs"
 assert "OAuth consent CLI: loopback callback, state check, code exchange, scopes, and token file" "node tests/oauth-consent-unit.mjs"
 assert "Tool input: calls over 1000 array elements and object keys are refused before validation" "node tests/tool-input-unit.mjs"

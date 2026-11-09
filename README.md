@@ -2,7 +2,16 @@
 
 ### Reddit Browser for Claude Desktop and AI Assistants
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for browsing Reddit, searching posts, and analyzing user activity. Anonymous browsing uses Reddit's public RSS feeds when available. Search, comments, user analysis, and full metrics require approved Reddit API access. Version 1.2.0 adds optional posting and commenting with per-process caps and a client-dependent confirmation flow. See [Posting](#posting-v120).
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for browsing Reddit, searching posts, and analyzing user activity. It needs existing approved Reddit API credentials. Version 1.2.0 added optional posting and commenting with per-process caps and a client-dependent confirmation flow. See [Posting](#posting-v120).
+
+> **Reddit is closing the access this server uses.** Only people who already hold approved Reddit API credentials can use it.
+>
+> - **2026-10-31:** Reddit stopped accepting new requests for public API access ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)).
+> - **2026-11-13:** Reddit ends RSS feed support ([changelog, October 8, 2026](https://support.reddithelp.com/hc/en-us/articles/54353370049684-Changelog-October-8-2026)). RSS was the only thing this server could read without credentials, so from this date every call without credentials returns an error saying credentials are needed.
+> - **2027-01-12:** Reddit starts closing API access for apps whose owners have not registered them at [developers.reddit.com/app-registration](https://developers.reddit.com/app-registration) or answered Reddit's outreach ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)).
+> - **March 2027:** Reddit ends the remaining public API access ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)).
+>
+> This project cannot grant API access or register your app for you.
 
 [![npm version](https://img.shields.io/npm/v/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
 [![npm downloads](https://img.shields.io/npm/dm/reddit-mcp-buddy.svg)](https://www.npmjs.com/package/reddit-mcp-buddy)
@@ -25,7 +34,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for bro
 - [Quick Start](#quick-start-30-seconds)
 - [What can it do?](#what-can-it-do)
 - [Available Tools](#available-tools)
-- [Authentication](#authentication-optional)
+- [Authentication](#authentication)
 - [Posting (v1.2.0)](#posting-v120)
 - [Installation Options](#installation-options)
   - [Global Install](#global-install)
@@ -40,7 +49,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for bro
 
 ## What makes Reddit MCP Buddy different?
 
-- **🚀 Anonymous browsing** - Browse subreddits through public RSS feeds when available; other live-data tools need approved API access
+- **🔑 Built for existing API access** - Uses your approved Reddit app's credentials through Reddit's OAuth API
 - **✍️ Opt-in posting (v1.2.0)** - Create posts and comments with a client-dependent confirmation flow, per-process caps, and duplicate suppression
 - **⚡ Local rate limits** - Configured caps of 10/60/100 requests per minute; Reddit applies its own limits
 - **🎯 Clean data** - No fake "sentiment analysis" or made-up metrics
@@ -54,18 +63,22 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for bro
 
 1. **Download**: [reddit-mcp-buddy.mcpb](https://github.com/karanb192/reddit-mcp-buddy/releases/latest/download/reddit-mcp-buddy.mcpb)
 2. **Install**: Open the downloaded file
-3. **Done!** Reddit tools are now available in Claude
+3. **Add credentials**: Enter your approved Reddit app's client ID and secret in the extension settings (see [Authentication](#authentication))
 
 ### For Claude Desktop - NPM Method (Alternative)
 
-Add this to your `claude_desktop_config.json`:
+Add this to your `claude_desktop_config.json`, with your approved app's credentials (see [Authentication](#authentication)):
 
 ```json
 {
   "mcpServers": {
     "reddit": {
       "command": "npx",
-      "args": ["-y", "reddit-mcp-buddy"]
+      "args": ["-y", "reddit-mcp-buddy"],
+      "env": {
+        "REDDIT_CLIENT_ID": "your_client_id",
+        "REDDIT_CLIENT_SECRET": "your_client_secret"
+      }
     }
   }
 }
@@ -76,12 +89,14 @@ Add this to your `claude_desktop_config.json`:
 Run this command to add the MCP server (user scope):
 
 ```bash
-claude mcp add --transport stdio reddit-mcp-buddy -s user -- npx -y reddit-mcp-buddy
+claude mcp add --transport stdio reddit-mcp-buddy -s user \
+  -e REDDIT_CLIENT_ID=your_client_id -e REDDIT_CLIENT_SECRET=your_client_secret \
+  -- npx -y reddit-mcp-buddy
 ```
 
 ### For Other MCP Clients
 
-Use the NPM method: `npx -y reddit-mcp-buddy`
+Run `npx -y reddit-mcp-buddy` with `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` set in its environment.
 
 ## What can it do?
 
@@ -108,7 +123,7 @@ Browse posts from any subreddit with sorting options.
 - Include subreddit info: Optional flag for subreddit metadata (requires credentials)
 ```
 
-> **No credentials?** Results are served from Reddit's public RSS feed (`data_source: "rss"`): `score`, `num_comments`, `upvote_ratio`, and `nsfw` come back `null`, and the `include_nsfw` filter can't be applied. Add credentials ([Authentication](#authentication-optional)) for full data via the API.
+> **No credentials?** Until 2026-11-13, results come from Reddit's RSS feed (`data_source: "rss"`): `score`, `num_comments`, `upvote_ratio`, and `nsfw` come back `null`, and the `include_nsfw` filter can't be applied. Reddit ends RSS support on 2026-11-13 ([changelog](https://support.reddithelp.com/hc/en-us/articles/54353370049684-Changelog-October-8-2026)); from then on browsing needs credentials too ([Authentication](#authentication)).
 
 ### `search_reddit`
 Search across Reddit or specific subreddits.
@@ -152,33 +167,26 @@ Get explanations of Reddit terms.
 
 `create_post`, `add_comment`, and `subreddit_rules` only appear when you enable posting; read-only installs see exactly the five tools above. Details in [Posting (v1.2.0)](#posting-v120).
 
-## Authentication (Optional)
+## Authentication
 
-Search, post details, user analysis, and full metrics require Reddit API credentials for an approved app and use case.
+Every tool that reads Reddit needs credentials for a Reddit app whose API access Reddit has already approved. Only `reddit_explain`, which works offline, runs without them.
 
-### Reddit API approval
+### Who can use this server
 
-Reddit's [Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy) requires explicit approval before using its API. Creating an app is not a self-service guarantee of access. Reddit directs developers to [Devvit](https://developers.reddit.com/) first; for use cases Devvit does not support, use [Reddit's API access request form](https://support.reddithelp.com/hc/en-us/requests/new?tf_42139884615700=api_request_type_developer_clone&ticket_form_id=14868593862164).
+- **You already hold approved Reddit API access:** use your app's credentials below.
+- **You do not:** Reddit stopped accepting new requests for public API access on 2026-10-31 ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)), so there is no way to get credentials for this server now. This project cannot grant access, and it does not provide shared API keys or a third-party OAuth service.
+- **Keep your access past 2027-01-12:** Reddit starts closing API access on that date for apps whose owners have not registered them at [developers.reddit.com/app-registration](https://developers.reddit.com/app-registration) or answered Reddit's outreach ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)). Registration is done by each app's owner; this project cannot do it for you.
 
-If you already have approved access, use your app's credentials below. This project cannot grant approval or guarantee an approval timeline, and it does not provide shared API keys or a third-party OAuth service.
-
-Without credentials, `browse_subreddit` can use public RSS feeds and `reddit_explain` works offline. RSS can be blocked or throttled and does not provide engagement metrics or NSFW flags. It does not enable search, post details, or user analysis, and it does not grant API approval.
+Without credentials, `browse_subreddit` reads Reddit's RSS feeds only until 2026-11-13, when Reddit ends RSS support ([changelog](https://support.reddithelp.com/hc/en-us/articles/54353370049684-Changelog-October-8-2026)). From then on every Reddit tool returns an error that says credentials are needed.
 
 ### Setup Steps
 
-1. **Obtain Reddit API approval** for your app and use case using the links above.
-2. **Open** https://www.reddit.com/prefs/apps and select your approved app. If Reddit instructs you to create an app, follow its instructions.
-3. **Fill out the form:**
-   - **Name**: For example, "mcp-buddy". Reddit rejects client names containing "reddit".
-   - **App type**: Use **"script"** for password-grant authentication or **"web app"** for OAuth consent with a refresh token. App-only mode supports both.
-   - **Description**: Optional
-   - **About URL**: Leave blank
-   - **Redirect URI**: Your registered OAuth callback, such as `http://localhost:8080`. It is unused by password-grant authentication.
-4. **Complete app registration** as directed by Reddit. If creation is unavailable, follow up through Reddit's access request process.
-5. **Find your credentials:**
+1. **Open** https://www.reddit.com/prefs/apps and select your approved app.
+2. **Check the app type:** **"script"** supports password-grant authentication, **"web app"** supports OAuth consent with a refresh token (see below), and app-only mode works with both.
+3. **Find your credentials:**
    - **Client ID**: The string beneath the app's name and type
    - **Client Secret**: The secret string
-6. **Update your Claude Desktop config:**
+4. **Update your Claude Desktop config:**
 
 ```json
 {
@@ -232,14 +240,14 @@ Reddit MCP Buddy enforces these local caps. They are not Reddit API quotas or gu
 
 | Mode | Local Cap | Required Credentials | Best For |
 |------|------------|---------------------|----------|
-| **Anonymous** | 10 req/min* | None | Testing, light usage |
+| **No credentials** | 10 req/min* | None | Ends 2026-11-13 |
 | **App-Only** | 60 req/min | Client ID + Secret | Regular browsing |
 | **Authenticated** | 100 req/min | Client ID + Secret, plus refresh token or username/password | Heavy usage, automation |
 
-*\*Server-side cap. Anonymous requests are served from Reddit's logged-out RSS feed, which applies its own stricter per-IP throttle (often one uncached request per 25-60 seconds). The 15-minute cache and automatic retries absorb much of this, but sustained anonymous browsing is effectively slower than 10 req/min.*
+*\*Until 2026-11-13 only. Requests without credentials are served from Reddit's logged-out RSS feed, which applies its own stricter per-IP throttle.*
 
 #### How It Works:
-- **Anonymous Mode**: Default mode, no setup required. Only `browse_subreddit` (plus the offline `reddit_explain`) works: Reddit blocks the logged-out JSON API, so browse results come from Reddit's public RSS feed (`data_source: "rss"`) with engagement metrics and NSFW flags as `null`. The remaining tools require credentials.
+- **No credentials**: Until 2026-11-13, only `browse_subreddit` (from Reddit's RSS feed, with engagement metrics and NSFW flags as `null`) and the offline `reddit_explain` work. After Reddit ends RSS support that day, every Reddit tool returns an error that says credentials are needed.
 - **App-Only Mode**: Uses OAuth2 client credentials grant (works with both script and web apps)
 - **Authenticated Mode**: Uses OAuth2 refresh-token authentication for an authorized web app, or password grant for a script app
 
@@ -440,7 +448,7 @@ The Docker image and CI workflows use Node.js 26. To build and run the image:
 git clone https://github.com/karanb192/reddit-mcp-buddy.git
 cd reddit-mcp-buddy
 docker build --pull -t reddit-mcp-buddy .
-docker run -it reddit-mcp-buddy
+docker run -it -e REDDIT_CLIENT_ID=your_client_id -e REDDIT_CLIENT_SECRET=your_client_secret reddit-mcp-buddy
 ```
 
 Run the container smoke test with Docker, curl, and jq installed:
@@ -457,7 +465,7 @@ For one-click installation in Claude Desktop, download the pre-built extension:
 
 **📦 [Download reddit-mcp-buddy.mcpb](https://github.com/karanb192/reddit-mcp-buddy/releases/latest/download/reddit-mcp-buddy.mcpb)**
 
-**Installation:** Simply open the downloaded `.mcpb` file - Claude Desktop will automatically install the extension and the Reddit tools will be immediately available.
+**Installation:** Open the downloaded `.mcpb` file and Claude Desktop installs the extension. Then enter your approved Reddit app's credentials in the extension settings (see [Authentication](#authentication)).
 
 #### Build from Source (Optional)
 
@@ -474,7 +482,7 @@ cd reddit-mcp-buddy
 
 | Feature | Reddit MCP Buddy | Other MCP Tools |
 |---------|-------------|----------------|
-| **Anonymous Access** | RSS browsing; other data tools require approved API access | Varies by server |
+| **Credentials** | Existing approved Reddit API access required | Varies by server |
 | **Language** | TypeScript/Node.js | Python (most) |
 | **Tools Count** | 5 read + 3 opt-in write | 8-10 (redundant) |
 | **Fake Metrics** | ✅ Real data only | ❌ "Sentiment scores" |
@@ -487,17 +495,16 @@ cd reddit-mcp-buddy
 
 | Mode | Requests/Minute | Cache TTL | Setup Required |
 |------|----------------|-----------|----------------|
-| Anonymous | 10 | 15 min | None |
+| No credentials (until 2026-11-13) | 10 | 15 min | None |
 | App-only | 60 | 5 min | Client ID + Secret |
 | Authenticated | 100 | 5 min | All credentials |
 
-*Cache TTL applies to subreddit listings. Post details (10 min), search results (10 min), and user profiles (15 min) use fixed TTLs in all modes. Anonymous throughput is additionally bounded by Reddit's own per-IP RSS throttle, which is stricter than 10/min for uncached requests.*
+*Cache TTL applies to subreddit listings. Post details (10 min), search results (10 min), and user profiles (15 min) use fixed TTLs in all modes.*
 
 ## Why Reddit MCP Buddy?
 
 ### What others do wrong:
 - ❌ **Fake metrics** - "sentiment scores" that are just keyword counting
-- ❌ **Complex setup** - Requiring API keys just to start
 - ❌ **Bloated responses** - Returning 100+ fields of Reddit's raw API
 - ❌ **Poor LLM integration** - Confusing parameters and unclear descriptions
 
@@ -545,8 +552,12 @@ cd reddit-mcp-buddy
 
 ### Common Issues
 
+**"Reddit ended logged-out RSS access on 2026-11-13"**
+- The server has no credentials, and Reddit no longer serves the RSS feeds it used without them ([changelog](https://support.reddithelp.com/hc/en-us/articles/54353370049684-Changelog-October-8-2026)). The subreddit, post, or user you asked for is not the problem
+- Add your approved app's credentials (see [Authentication](#authentication)). Reddit stopped accepting new API access requests on 2026-10-31, so this only helps people who already hold access
+
 **"Cannot create an app" or "API approval required"**
-- Follow Reddit's [approval process](#reddit-api-approval); this project cannot approve an app or remove Reddit's restrictions
+- Reddit stopped accepting new requests for public API access on 2026-10-31 ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)); this project cannot approve an app or remove Reddit's restrictions
 - Use credentials only for an app and use case Reddit has approved
 
 **"Can't achieve 100 requests/minute"**
@@ -565,13 +576,12 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 ```
 
 **Browsing works but search / comments / user analysis fail**
-- Without credentials only `browse_subreddit` (served from Reddit's public RSS feed, no scores or comment counts) and the offline `reddit_explain` work
-- Anonymous browsing can also hit Reddit's own RSS rate limit (HTTP 429); the server retries automatically, but sustained throttling can still fail
-- Solution: Add Reddit credentials (see [Authentication](#authentication-optional))
+- Without credentials, only `browse_subreddit` (from Reddit's RSS feed, until 2026-11-13) and the offline `reddit_explain` work
+- Solution: Add your approved app's credentials (see [Authentication](#authentication))
 
 **Rate limit errors**
-- Local caps: 10 requests/minute without auth, 60 with app credentials, and 100 with full authentication
-- Reddit applies separate API and RSS limits; the server retries transient failures, but sustained throttling can still fail
+- Local caps: 60 requests/minute with app credentials and 100 with full authentication (10 without credentials, until 2026-11-13)
+- Reddit applies its own API limits; the server retries transient failures, but sustained throttling can still fail
 - Reduce request frequency and respect Reddit's rate-limit responses
 - If an error says `Retry in Ns`, wait that long before retrying. The server returns long upstream waits immediately instead of sleeping through the client's request timeout.
 
@@ -596,8 +606,8 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 #### Authentication Variables
 | Variable | Description | Required | Rate Limit |
 |----------|-------------|----------|------------|
-| `REDDIT_CLIENT_ID` | Reddit app client ID | No | Local cap: 60 req/min (with secret) |
-| `REDDIT_CLIENT_SECRET` | Reddit app secret | No | Local cap: 60 req/min (with ID) |
+| `REDDIT_CLIENT_ID` | Reddit app client ID | Yes (from 2026-11-13) | Local cap: 60 req/min (with secret) |
+| `REDDIT_CLIENT_SECRET` | Reddit app secret | Yes (from 2026-11-13) | Local cap: 60 req/min (with ID) |
 | `REDDIT_USERNAME` | Reddit account username | No | Local cap: 100 req/min (with all 4) |
 | `REDDIT_PASSWORD` | Reddit account password | No | Local cap: 100 req/min (with all 4) |
 | `REDDIT_REFRESH_TOKEN` | OAuth refresh token; leave password unset | No | Local cap: 100 req/min with client ID + secret |
@@ -661,7 +671,7 @@ See [Node's proxy and certificate configuration guide](https://nodejs.org/learn/
 Reddit MCP Buddy includes intelligent caching to improve performance and reduce API calls:
 
 - **Memory Safe**: Hard limit of 50MB - won't affect your system performance
-- **Per-Content TTLs**: Post details (10min), user profiles (15min), search results (10min); subreddit listings use the mode default (15min anonymous, 5min with credentials)
+- **Per-Content TTLs**: Post details (10min), user profiles (15min), search results (10min); subreddit listings use the mode default (5min with credentials)
 - **LRU Eviction**: Automatically removes least-used data when approaching limits
 - **Hit Tracking**: Optimizes cache based on actual usage patterns
 

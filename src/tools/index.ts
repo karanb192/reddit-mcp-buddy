@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { RedditAPI, RSS_UNKNOWN_SCORE } from '../services/reddit-api.js';
+import { RedditAPI, RSS_UNKNOWN_SCORE, LoggedOutAccessEndedError } from '../services/reddit-api.js';
 import { ContentProcessor } from '../services/content-processor.js';
 import { RedditListing, RedditPost } from '../types/reddit.types.js';
 
@@ -32,7 +32,7 @@ export const browseSubredditSchema = z.object({
   time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional(),
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Change ONLY IF user specifies.'),
   include_nsfw: z.boolean().optional().default(false),
-  include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description. Requires Reddit credentials; silently omitted when browsing anonymously via the RSS fallback'),
+  include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description. Requires Reddit credentials; omitted from RSS fallback results'),
 });
 
 export const searchRedditSchema = z.object({
@@ -212,6 +212,14 @@ export class RedditTools {
 
         // Use allSettled to handle individual subreddit failures gracefully
         const allResults = await Promise.allSettled(searchPromises);
+
+        // The shutdown applies to every subreddit. Preserve it even if another search
+        // completed just before the cutoff, instead of suggesting different subreddit names.
+        for (const result of allResults) {
+          if (result.status === 'rejected' && result.reason instanceof LoggedOutAccessEndedError) {
+            throw result.reason;
+          }
+        }
 
         // Combine results from successful searches, skip failed ones
         const successfulResults = allResults

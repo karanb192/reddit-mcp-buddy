@@ -2,9 +2,9 @@
   "manifest_version": "0.2",
   "name": "reddit-mcp-buddy",
   "display_name": "Reddit MCP Buddy",
-  "version": "1.2.0",
-  "description": "Browse subreddit RSS feeds in Claude Desktop. Search, post details, and user analysis require approved Reddit API access.",
-  "long_description": "Reddit MCP Buddy connects Claude Desktop to Reddit. Anonymous subreddit browsing uses RSS, which Reddit can block or throttle. Search, post details, and user analysis require approved Reddit API access and credentials. See the README Authentication section for Reddit's approval process.\n\n**Features:**\n• Browse subreddit posts\n• Search Reddit content with approved API access\n• Analyze user profiles with approved API access\n• Get post details and comments with approved API access\n• Explain Reddit terminology offline\n• Cache responses to reduce repeated requests\n\nThe server uses local caps of 10, 60, or 100 requests per minute depending on authentication mode. These are not Reddit quotas or guaranteed throughput; Reddit applies its own limits. Adding a username and password does not grant extra Reddit quota.\n\nRuns on Windows, macOS, and Linux.",
+  "version": "1.2.1",
+  "description": "Browse, search, and analyze Reddit in Claude Desktop. Needs existing approved Reddit API credentials.",
+  "long_description": "Reddit MCP Buddy connects Claude Desktop to Reddit. It needs credentials for a Reddit app whose API access Reddit has already approved: Reddit stopped accepting new API access requests on 2026-10-31 and ends the RSS feeds this extension used without credentials on 2026-11-13. To keep API access past 2027-01-12, register your app at https://developers.reddit.com/app-registration. See the README Authentication section.\n\n**Features:**\n• Browse subreddit posts\n• Search Reddit content\n• Analyze user profiles\n• Get post details and comments\n• Explain Reddit terminology offline\n• Cache responses to reduce repeated requests\n\nThe server uses local caps of 60 or 100 requests per minute depending on authentication mode. These are not Reddit quotas or guaranteed throughput; Reddit applies its own limits. Adding a username and password does not grant extra Reddit quota.\n\nRuns on Windows, macOS, and Linux.",
   "author": {
     "name": "Karan Bansal",
     "email": "karanb192@gmail.com",
@@ -75,22 +75,21 @@
     "analysis",
     "community",
     "research",
-    "browsing",
-    "no-auth"
+    "browsing"
   ],
   "license": "MIT",
   "user_config": {
     "reddit_client_id": {
       "type": "string",
       "title": "Reddit Client ID",
-      "description": "Your approved Reddit app client ID (with secret: local cap of 60 req/min; Reddit applies its own limits)",
+      "description": "Required. Your approved Reddit app client ID (with secret: local cap of 60 req/min; Reddit applies its own limits)",
       "required": false,
       "sensitive": false
     },
     "reddit_client_secret": {
       "type": "string",
       "title": "Reddit Client Secret",
-      "description": "Your approved Reddit app client secret (required with client ID)",
+      "description": "Required. Your approved Reddit app client secret",
       "required": false,
       "sensitive": true
     },

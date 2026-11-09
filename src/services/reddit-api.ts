@@ -25,6 +25,8 @@ export interface RedditAPIOptions {
   rateLimiter: RateLimiter;
   cacheManager: CacheManager;
   timeout?: number;
+  /** Epoch ms from which logged-out reads are refused. Defaults to LOGGED_OUT_ACCESS_ENDS_AT. */
+  loggedOutAccessEndsAt?: number;
 }
 
 export interface SubmitPostParams {
@@ -80,6 +82,42 @@ interface WriteEnvelope<T> {
  */
 export const RSS_UNKNOWN_SCORE = -1;
 
+/**
+ * Reddit stops supporting RSS feeds on 2026-11-13 (changelog, October 8, 2026), and those feeds
+ * are the only data a logged-out server still gets. Nobody can see in advance how a retired feed
+ * will answer (404, 403, an HTML page, a redirect, an empty feed), and each of those would surface
+ * as a misleading "subreddit does not exist", so from this instant logged-out reads fail with
+ * LOGGED_OUT_ENDED_MESSAGE without contacting Reddit. Midnight UTC is 05:30 IST and 16:00 Pacific
+ * on the 12th, so the switch is in place before Reddit's US working day on the 13th.
+ */
+export const LOGGED_OUT_ACCESS_ENDS_AT = Date.UTC(2026, 10, 13);
+
+const CREDENTIALS_NEEDED =
+  'existing approved Reddit API credentials (REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET; see README -> Authentication). ' +
+  'Reddit starts closing API access on 2027-01-12 for apps whose owners have not registered them at ' +
+  'https://developers.reddit.com/app-registration.';
+
+// Says the cause is access, not the subreddit, post or user, so the model stops retrying other names.
+export const LOGGED_OUT_ENDED_MESSAGE =
+  'Reddit ended logged-out RSS access on 2026-11-13 and stopped accepting new API access requests on ' +
+  '2026-10-31, so this server needs ' + CREDENTIALS_NEEDED +
+  ' This is not a problem with the subreddit, post, or user you asked for.';
+
+/** An access-wide failure that aggregating callers must not hide as a subreddit failure. */
+export class LoggedOutAccessEndedError extends Error {
+  readonly status = 403;
+
+  constructor() {
+    super(LOGGED_OUT_ENDED_MESSAGE);
+    this.name = 'LoggedOutAccessEndedError';
+  }
+}
+
+// Appended to logged-out RSS failures before the cutoff, in case Reddit turns the feeds off early.
+const RSS_ENDING_NOTE =
+  ' If every subreddit fails this way, Reddit may already have ended logged-out RSS access ' +
+  '(announced for 2026-11-13); this server then needs ' + CREDENTIALS_NEEDED;
+
 export class RedditAPI {
   private auth: AuthManager;
   private rateLimiter: RateLimiter;
@@ -111,9 +149,9 @@ export class RedditAPI {
   // "private or quarantined" here sends the model off trying other
   // subreddits when the real cause is the logged-out IP block.
   private readonly ANON_BLOCKED_MESSAGE =
-    'Reddit rejected anonymous API access. This tool needs approved Reddit API ' +
-    'credentials (see README -> Authentication); browse_subreddit may still work ' +
-    'via RSS.';
+    'Reddit rejected logged-out API access. This tool needs ' + CREDENTIALS_NEEDED +
+    ' Without credentials, browse_subreddit reads Reddit\'s RSS feeds only until Reddit ends them on 2026-11-13.';
+  private readonly loggedOutAccessEndsAt: number;
   // Rules-family reads (rules, requirements, about, flairs) share one TTL so
   // invalidation and expiry behave uniformly across the aggregate rules tool.
   private readonly RULES_TTL_MS = 15 * 60 * 1000;
@@ -123,6 +161,20 @@ export class RedditAPI {
     this.rateLimiter = options.rateLimiter;
     this.cache = options.cacheManager;
     this.timeout = options.timeout ?? 10000; // Increased timeout to 10 seconds
+    this.loggedOutAccessEndsAt = options.loggedOutAccessEndsAt ?? LOGGED_OUT_ACCESS_ENDS_AT;
+  }
+
+  /** True once Reddit's logged-out RSS access has ended and no credentials are configured. */
+  loggedOutAccessEnded(): boolean {
+    return !this.auth.isAuthenticated() && Date.now() >= this.loggedOutAccessEndsAt;
+  }
+
+  // Runs before the cache as well as before the network, so a feed cached minutes before the
+  // cutoff cannot make a logged-out server look like it still works.
+  private assertLoggedOutAccessOpen(): void {
+    if (this.loggedOutAccessEnded()) {
+      throw new LoggedOutAccessEndedError();
+    }
   }
 
   private anonBlockedError(): Error {
@@ -151,6 +203,7 @@ export class RedditAPI {
       after?: string;
     } = {}
   ): Promise<RedditListing<RedditPost>> {
+    this.assertLoggedOutAccessOpen();
     // Validate and clean subreddit name
     if (!subreddit || subreddit.trim() === '') {
       throw new Error('Subreddit name is required. Try "programming", "technology", "news", or "AskReddit"');
@@ -206,6 +259,7 @@ export class RedditAPI {
         if (this.auth.isAuthenticated()) {
           throw error; // OAuth path should work; don't mask real failures
         }
+        this.assertLoggedOutAccessOpen();
         console.error(`⚠️ Anonymous .json failed (${error instanceof Error ? error.message : error}). Falling back to RSS feed.`);
         try {
           data = await this.browseSubredditViaRSS(subreddit, sort, { limit, time });
@@ -217,6 +271,9 @@ export class RedditAPI {
             this.anonJsonBlockedUntil = Date.now() + this.ANON_JSON_BLOCK_TTL_MS;
           }
         } catch (rssError) {
+          // RSS may have crossed the cutoff after the JSON probe failed. Do not wrap the
+          // shutdown message with the earlier, potentially misleading resource error.
+          this.assertLoggedOutAccessOpen();
           // Surface both failures so the cause is clear; the RSS status is the one the caller can act on
           const message =
             `Both the JSON API and the RSS fallback failed for r/${subreddit}. ` +
@@ -255,22 +312,27 @@ export class RedditAPI {
     try {
       xml = await this.getRSS(`/r/${encodeURIComponent(subreddit)}/${sort}/.rss?${params.toString()}`);
     } catch (error) {
+      // A call that crosses the cutoff must not report the retired feed's answer as a subreddit problem.
+      this.assertLoggedOutAccessOpen();
       // Once the JSON probe is skipped (anonJsonBlockedUntil), these errors
       // reach the user directly — give them subreddit context instead of a
       // bare "RSS feed request failed (NNN)".
       const status = (error as { status?: number }).status;
       if (status === 404) {
-        throw new Error(`Not found - r/${subreddit} does not exist or is inaccessible`);
+        throw this.httpError(`Not found - r/${subreddit} does not exist or is inaccessible.${RSS_ENDING_NOTE}`, 404);
       }
       if (status === 403 && /^(all|popular)$/i.test(subreddit)) {
         // Aggregates cannot be private or quarantined; Reddit is refusing this logged-out feed.
-        throw this.httpError(`Reddit refused the logged-out RSS feed for r/${subreddit}/${sort} (HTTP 403). Try another sort or a specific subreddit, or add approved Reddit API credentials.`, 403);
+        throw this.httpError(`Reddit refused the logged-out RSS feed for r/${subreddit}/${sort} (HTTP 403). Try another sort or a specific subreddit.${RSS_ENDING_NOTE}`, 403);
       }
       if (status === 403) {
-        throw new Error(`Cannot access r/${subreddit} - it may be private, quarantined, or NSFW (Reddit's logged-out feed refuses NSFW subreddits)`);
+        throw this.httpError(`Cannot access r/${subreddit} - it may be private, quarantined, or NSFW (Reddit's logged-out feed refuses NSFW subreddits).${RSS_ENDING_NOTE}`, 403);
       }
       if (status === 429) {
         throw this.httpError(`Reddit rate-limited the RSS feed for r/${subreddit}. ${error instanceof Error ? error.message : 'Wait before retrying.'}`, 429);
+      }
+      if (error instanceof Error && !/timed out|rate limit/i.test(error.message)) {
+        throw this.httpError(`${error.message}.${RSS_ENDING_NOTE}`, status ?? 502);
       }
       throw error;
     }
@@ -396,6 +458,7 @@ export class RedditAPI {
    * Uses the same rate limiter and timeout as the JSON path.
    */
   private async getRSS(endpoint: string, retries: number = 2): Promise<string> {
+    this.assertLoggedOutAccessOpen();
     if (!this.rateLimiter.canMakeRequest()) {
       throw new Error(this.rateLimiter.getErrorMessage(this.auth.isAuthenticated()));
     }
@@ -454,6 +517,7 @@ export class RedditAPI {
       depth?: number;
     } = {}
   ): Promise<[RedditListing<RedditPost>, RedditListing<RedditComment>]> {
+    this.assertLoggedOutAccessOpen();
     const { limit = 50, sort = 'best', depth = 3 } = options;
 
     // Extract subreddit and post ID from various formats
@@ -542,6 +606,7 @@ export class RedditAPI {
       restrictSr?: boolean;
     } = {}
   ): Promise<RedditListing<RedditPost>> {
+    this.assertLoggedOutAccessOpen();
     const { 
       subreddit, 
       sort = 'relevance', 
@@ -589,6 +654,7 @@ export class RedditAPI {
    * Get user information
    */
   async getUser(username: string): Promise<RedditUser> {
+    this.assertLoggedOutAccessOpen();
     const cacheKey = CacheManager.createKey('user', username);
     
     const cached = this.cache.get<RedditUser>(cacheKey);
@@ -619,6 +685,7 @@ export class RedditAPI {
       limit?: number;
     } = {}
   ): Promise<RedditListing<RedditPost | RedditComment>> {
+    this.assertLoggedOutAccessOpen();
     const { sort = 'new', time = 'all', limit = 10 } = options;
     
     const cacheKey = CacheManager.createKey('user-posts', username, type, sort, time, limit);
@@ -648,6 +715,7 @@ export class RedditAPI {
    * Get subreddit information
    */
   async getSubreddit(name: string): Promise<RedditSubreddit> {
+    this.assertLoggedOutAccessOpen();
     const cacheKey = CacheManager.createKey('subreddit-info', name);
     
     const cached = this.cache.get<RedditSubreddit>(cacheKey);
@@ -669,6 +737,7 @@ export class RedditAPI {
    * Get trending subreddits
    */
   async getTrending(): Promise<string[]> {
+    this.assertLoggedOutAccessOpen();
     const cacheKey = CacheManager.createKey('trending');
     
     const cached = this.cache.get<string[]>(cacheKey);
@@ -1137,6 +1206,7 @@ export class RedditAPI {
    * Private: Implementation of GET request with retry logic
    */
   private async getImpl<T>(endpoint: string, retries: number = 2): Promise<T> {
+    this.assertLoggedOutAccessOpen();
     // Check rate limit
     if (!this.rateLimiter.canMakeRequest()) {
       const isAuth = this.auth.isAuthenticated();

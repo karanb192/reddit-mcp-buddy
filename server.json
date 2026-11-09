@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.karanb192/reddit-mcp-buddy",
-  "version": "1.2.0",
-  "description": "Browse Reddit RSS; approved API access for search, analysis, and optional posting.",
+  "version": "1.2.1",
+  "description": "Search, browse, and analyze Reddit; optional posting. Needs existing approved Reddit API access.",
   "author": {
     "name": "Karan Bansal",
     "email": "karanb192@gmail.com",
@@ -20,7 +20,7 @@
     {
       "registryType": "npm",
       "identifier": "reddit-mcp-buddy",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "transport": {
         "type": "stdio"
       }
