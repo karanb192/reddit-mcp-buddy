@@ -1,11 +1,19 @@
 import assert from 'node:assert/strict';
-import { RedditAPI, LOGGED_OUT_ACCESS_ENDS_AT, LOGGED_OUT_ENDED_MESSAGE } from '../dist/services/reddit-api.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { RedditAPI, LOGGED_OUT_ACCESS_ENDS_AT, LOGGED_OUT_ENDED_MESSAGE, LoggedOutAccessEndedError } from '../dist/services/reddit-api.js';
 import { RedditTools } from '../dist/tools/index.js';
 import { CacheManager } from '../dist/core/cache.js';
 import { createMCPServer } from '../dist/mcp-server.js';
 
-for (const name of ['REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET', 'REDDIT_USERNAME', 'REDDIT_PASSWORD', 'REDDIT_REFRESH_TOKEN']) {
-  delete process.env[name];
+const originalEnv = { ...process.env };
+const testHome = mkdtempSync(join(tmpdir(), 'reddit-rss-shutdown-'));
+// Clearing env credentials alone still lets AuthManager load a developer's saved --auth config.
+process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
+for (const name of Object.keys(process.env)) {
+  if (name.startsWith('REDDIT_')) delete process.env[name];
 }
 
 const realNow = Date.now;
@@ -103,6 +111,26 @@ try {
     }
   }
 
+  // JSON can fail before the cutoff while the RSS fallback finishes after it. The outer
+  // fallback handler must not add the earlier JSON error back onto the shutdown message.
+  for (const jsonStatus of [403, 404]) {
+    for (const [label, answer] of Object.entries(retiredFeedAnswers)) {
+      if (label === 'working feed' || label === 'empty feed') continue;
+      const endsAt = realNow() + 3600000;
+      Date.now = realNow;
+      fetchCalls = 0;
+      globalThis.fetch = async url => {
+        fetchCalls++;
+        if (!String(url).includes('.rss')) return new Response('', { status: jsonStatus });
+        Date.now = () => endsAt + 1;
+        return answer();
+      };
+      await assert.rejects(client({ endsAt }).api.browseSubreddit('programming'), isShutdown,
+        `cutoff during RSS, JSON ${jsonStatus}, RSS ${label}`);
+      assert.equal(fetchCalls, 2, 'the cutoff must be crossed during RSS, not the JSON probe');
+    }
+  }
+
   // Credentials are unaffected by the cutoff.
   Date.now = () => LOGGED_OUT_ACCESS_ENDS_AT + 86400000;
   fetchCalls = 0;
@@ -112,6 +140,28 @@ try {
   assert.equal((await authed.browseSubreddit('programming')).data._source, 'api');
   await authed.search('test');
   assert.equal(fetchCalls, 2);
+  const authedSearch = await new RedditTools(authed).searchReddit({
+    query: 'test', subreddits: ['programming', 'javascript'], limit: 10,
+  });
+  assert.equal(authedSearch.total_results, 0);
+  assert.equal(fetchCalls, 4, 'authenticated multi-subreddit searches remain available after the cutoff');
+
+  // Keep ordinary per-subreddit failure tolerance, but never hide a global shutdown
+  // behind a partial result from a search that completed just before the cutoff.
+  for (const failure of [new Error('subreddit unavailable'), new LoggedOutAccessEndedError()]) {
+    const partialTools = new RedditTools({
+      search: async (_query, { subreddit }) => {
+        if (subreddit === 'javascript') throw failure;
+        return { kind: 'Listing', data: { children: [], after: null, before: null } };
+      },
+    });
+    const search = partialTools.searchReddit({ query: 'test', subreddits: ['programming', 'javascript'], limit: 10 });
+    if (failure instanceof LoggedOutAccessEndedError) {
+      await assert.rejects(search, isShutdown, 'shutdown takes precedence over a partial result');
+    } else {
+      assert.equal((await search).total_results, 0, 'ordinary subreddit failures still allow partial results');
+    }
+  }
 
   // Through the tools layer: reddit_explain is offline and keeps working; the Reddit tools give the shutdown message.
   const tools = new RedditTools(client().api);
@@ -136,6 +186,8 @@ try {
   for (const [name, args] of [
     ['browse_subreddit', { subreddit: 'notreal999xyz' }],
     ['search_reddit', { query: 'test' }],
+    ['search_reddit', { query: 'test', subreddits: ['programming'] }],
+    ['search_reddit', { query: 'test', subreddits: ['programming', 'javascript'] }],
     ['get_post_details', { post_id: 'abc123' }],
     ['user_analysis', { username: 'spez' }],
   ]) {
@@ -172,4 +224,6 @@ try {
   Date.now = realNow;
   globalThis.fetch = originalFetch;
   for (const c of caches) c.destroy();
+  process.env = originalEnv;
+  rmSync(testHome, { recursive: true, force: true });
 }

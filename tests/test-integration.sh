@@ -521,7 +521,12 @@ assert_contains_authed "search_reddit global: has total_results" "$SEARCH_GLOBAL
 # Multi-subreddit search with Promise.allSettled (NEW)
 rate_limit_guard_double  # 2 parallel subreddit searches
 SEARCH_MULTI=$(call_tool "search_reddit" '{"query":"python","subreddits":["programming","learnprogramming"],"limit":4}')
-assert_contains_authed "search_reddit multi-subreddit (NEW allSettled): returns results" "$SEARCH_MULTI" '"results"'
+if [ "$LOGGED_OUT_ENDED" = "1" ]; then
+  assert_logged_out_ended "search_reddit multi-subreddit" "$SEARCH_MULTI"
+  assert_not_contains "search_reddit multi-subreddit: no misleading per-subreddit failure" "$SEARCH_MULTI" "Search failed for all subreddits"
+else
+  assert_contains_authed "search_reddit multi-subreddit (NEW allSettled): returns results" "$SEARCH_MULTI" '"results"'
+fi
 
 # Multi-subreddit with one invalid subreddit (NEW - failure tolerance)
 rate_limit_guard_double  # 2 parallel subreddit searches (one will 404)

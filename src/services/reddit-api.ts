@@ -103,6 +103,16 @@ export const LOGGED_OUT_ENDED_MESSAGE =
   '2026-10-31, so this server needs ' + CREDENTIALS_NEEDED +
   ' This is not a problem with the subreddit, post, or user you asked for.';
 
+/** An access-wide failure that aggregating callers must not hide as a subreddit failure. */
+export class LoggedOutAccessEndedError extends Error {
+  readonly status = 403;
+
+  constructor() {
+    super(LOGGED_OUT_ENDED_MESSAGE);
+    this.name = 'LoggedOutAccessEndedError';
+  }
+}
+
 // Appended to logged-out RSS failures before the cutoff, in case Reddit turns the feeds off early.
 const RSS_ENDING_NOTE =
   ' If every subreddit fails this way, Reddit may already have ended logged-out RSS access ' +
@@ -163,7 +173,7 @@ export class RedditAPI {
   // cutoff cannot make a logged-out server look like it still works.
   private assertLoggedOutAccessOpen(): void {
     if (this.loggedOutAccessEnded()) {
-      throw this.httpError(LOGGED_OUT_ENDED_MESSAGE, 403);
+      throw new LoggedOutAccessEndedError();
     }
   }
 
@@ -261,6 +271,9 @@ export class RedditAPI {
             this.anonJsonBlockedUntil = Date.now() + this.ANON_JSON_BLOCK_TTL_MS;
           }
         } catch (rssError) {
+          // RSS may have crossed the cutoff after the JSON probe failed. Do not wrap the
+          // shutdown message with the earlier, potentially misleading resource error.
+          this.assertLoggedOutAccessOpen();
           // Surface both failures so the cause is clear; the RSS status is the one the caller can act on
           const message =
             `Both the JSON API and the RSS fallback failed for r/${subreddit}. ` +
