@@ -83,14 +83,14 @@
       "type": "string",
       "title": "Reddit Client ID",
       "description": "Required. Your approved Reddit app client ID (with secret: local cap of 60 req/min; Reddit applies its own limits)",
-      "required": false,
+      "required": true,
       "sensitive": false
     },
     "reddit_client_secret": {
       "type": "string",
       "title": "Reddit Client Secret",
       "description": "Required. Your approved Reddit app client secret",
-      "required": false,
+      "required": true,
       "sensitive": true
     },
     "reddit_username": {

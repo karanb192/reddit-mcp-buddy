@@ -1,6 +1,6 @@
 # Reddit MCP Buddy - Development Scripts
 
-This folder contains development and testing scripts for contributors to validate and troubleshoot the three-tier authentication system.
+This folder contains development and testing scripts for contributors to validate and troubleshoot the app-only and authenticated modes.
 
 ## Quick Start
 
@@ -11,7 +11,7 @@ This folder contains development and testing scripts for contributors to validat
 
 2. **After obtaining approved Reddit API access, edit `.env` with your credentials:**
 
-   See [Authentication](../README.md#authentication-optional) for Reddit's approval process. These scripts test local server caps, not guaranteed Reddit quotas.
+   These scripts need an app Reddit has already approved; Reddit stopped taking new API access requests on 2026-10-31. See [Authentication](../README.md#authentication). These scripts test local server caps, not guaranteed Reddit quotas.
    ```bash
    # Edit scripts/.env and add your credentials
    REDDIT_CLIENT_ID=your_client_id
@@ -23,7 +23,6 @@ This folder contains development and testing scripts for contributors to validat
 3. **Test your rate limits:**
    ```bash
    npm run test:rate-limit             # Test with your credentials
-   npm run test:rate-limit:anon        # Test anonymous (10 rpm)
    npm run test:rate-limit:app         # Test app-only (60 rpm)
    npm run test:rate-limit:auth        # Test authenticated (100 rpm)
    ```
@@ -32,8 +31,7 @@ This folder contains development and testing scripts for contributors to validat
 
 ### rate-limit-tester.cjs
 
-Interactive rate limit testing tool for the server's three local caps (Reddit may throttle requests sooner):
-- **Anonymous**: 10 requests/minute (no credentials required)
+Interactive rate limit testing tool for the server's local caps (Reddit may throttle requests sooner):
 - **App-only**: 60 requests/minute (Client ID + Secret only)
 - **Authenticated**: 100 requests/minute (all 4 credentials required)
 
@@ -48,13 +46,11 @@ The tool automatically loads credentials from:
 node scripts/rate-limit-tester.cjs
 
 # Test specific modes
-node scripts/rate-limit-tester.cjs anonymous 15    # Test 15 requests in anonymous mode
 node scripts/rate-limit-tester.cjs app-only 70     # Test 70 requests in app-only mode
 node scripts/rate-limit-tester.cjs auth 120        # Test 120 requests in authenticated mode
 
 # Or use npm scripts
 npm run test:rate-limit         # Current environment
-npm run test:rate-limit:anon    # Anonymous (15 requests)
 npm run test:rate-limit:app     # App-only (70 requests)
 npm run test:rate-limit:auth    # Authenticated (120 requests)
 ```
@@ -98,5 +94,5 @@ When adding new scripts:
 2. Add documentation to this README
 3. Consider adding npm scripts in package.json for common operations
 4. Include clear error messages and usage instructions
-5. Test thoroughly with all three authentication tiers
+5. Test thoroughly with both app-only and authenticated credentials
 6. Never commit scripts with hardcoded credentials

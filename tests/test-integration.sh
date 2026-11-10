@@ -3,7 +3,8 @@
 # Integration tests for reddit-mcp-buddy
 # Tests HTTP server, live Reddit API (all 5 tools), edge cases, and stdio transport.
 #
-# WARNING: Hits live Reddit API. Anonymous mode = 10 req/min.
+# WARNING: Hits live Reddit API. Without credentials only RSS-backed browse checks run,
+# and only until Reddit ends RSS on 2026-11-13.
 # Takes ~15 minutes due to rate limit pauses.
 #
 # Usage: ./tests/test-integration.sh
@@ -451,7 +452,7 @@ assert_contains "Unknown tool returns error" "$UNKNOWN_TOOL" "Unknown tool"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 log_section "SECTION 4: MCP Tool Integration Tests (Live Reddit API)"
-echo -e "  ${YELLOW}Note: Anonymous mode = 10 req/min. Script will pause between batches.${NC}"
+echo -e "  ${YELLOW}Note: without credentials only RSS-backed browse checks run (until 2026-11-13). Script will pause between batches.${NC}"
 
 # --------------------------------------------------------------------------
 # 4a. browse_subreddit
