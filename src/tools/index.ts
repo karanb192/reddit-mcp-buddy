@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { RedditAPI, RSS_UNKNOWN_SCORE, LoggedOutAccessEndedError } from '../services/reddit-api.js';
+import { RedditAPI, RSS_UNKNOWN_SCORE, LoggedOutAccessEndedError, CredentialsRequiredError } from '../services/reddit-api.js';
 import { ContentProcessor } from '../services/content-processor.js';
 import { RedditListing, RedditPost } from '../types/reddit.types.js';
 
@@ -75,6 +75,65 @@ export const userAnalysisSchema = z.object({
 export const redditExplainSchema = z.object({
   term: z.string().describe('Reddit term to explain (e.g., "karma", "cake day", "AMA")'),
 });
+
+// Each candidate is looked up as one name, so multireddit paths (a+b) are refused here.
+const PLAIN_SUBREDDIT_RE = /^[A-Za-z0-9_]{2,21}$/;
+
+export const findSubredditsSchema = z.object({
+  need: z.string().trim().min(1).max(512)
+    .describe('What the user wants to find or discuss, in plain words (e.g., "budget mechanical keyboards for programmers"). Sent to Reddit\'s subreddit search.'),
+  candidates: z.array(
+    z.string()
+      .transform(s => s.trim().replace(/^\/?r\//i, ''))
+      .refine(s => PLAIN_SUBREDDIT_RE.test(s), 'Each candidate must be one subreddit name, 2-21 characters (letters, numbers, underscore), with or without r/')
+  ).max(10).optional()
+    .describe('Up to 10 subreddit names you think fit, without r/. Each is checked against Reddit; names Reddit does not return come back in not_found.'),
+  include_nsfw: z.boolean().optional().default(false),
+  limit: z.number().int().min(1).max(50).optional().default(10).describe('Default 10, range (1-50). Most Reddit search suggestions to return. Change ONLY IF user asks.'),
+});
+
+type SubredditSource = 'assistant' | 'reddit_search';
+
+interface FoundSubreddit {
+  name: string;
+  title: string | null;
+  description: string | null;
+  subscribers: number | null;
+  subscribers_as_of: string | null;
+  type: string | null;
+  nsfw: boolean | null;
+  source: SubredditSource;
+  confirmed_exists: boolean;
+}
+
+/**
+ * Pull subreddit records out of a Reddit listing without trusting its shape:
+ * a missing listing, null children, non-t5 kinds and records without a name are skipped.
+ */
+function subredditRecords(listing: unknown): any[] {
+  const children = (listing as any)?.data?.children;
+  if (!Array.isArray(children)) return [];
+  return children
+    .filter(child => child?.kind === 't5' && child.data && typeof child.data.display_name === 'string' && child.data.display_name.length > 0)
+    .map(child => child.data);
+}
+
+function shapeSubreddit(data: any, source: SubredditSource, fetchedAt: number): FoundSubreddit {
+  const description = typeof data.public_description === 'string' && data.public_description.trim()
+    ? data.public_description.trim()
+    : null;
+  return {
+    name: data.display_name,
+    title: typeof data.title === 'string' && data.title ? data.title : null,
+    description: description ? description.substring(0, 300) : null,
+    subscribers: typeof data.subscribers === 'number' && Number.isFinite(data.subscribers) ? data.subscribers : null,
+    subscribers_as_of: new Date(fetchedAt).toISOString(),
+    type: typeof data.subreddit_type === 'string' ? data.subreddit_type : null,
+    nsfw: typeof data.over18 === 'boolean' ? data.over18 : null,
+    source,
+    confirmed_exists: true,
+  };
+}
 
 /**
  * Shape RSS-sourced posts for consumption by an LLM.
@@ -541,6 +600,115 @@ export class RedditTools {
 
 
 
+
+  async findSubreddits(params: z.infer<typeof findSubredditsSchema>) {
+    const candidates: string[] = [];
+    const seen = new Set<string>();
+    for (const name of params.candidates ?? []) {
+      if (!seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        candidates.push(name);
+      }
+    }
+
+    const [searchOutcome, namesOutcome] = await Promise.allSettled([
+      this.api.searchSubreddits(params.need, params.limit),
+      candidates.length > 0 ? this.api.getSubredditsByName(candidates) : Promise.resolve(null),
+    ]);
+
+    // Access-wide failures win over partial results, so the caller is never sent off to try other names.
+    const rejections = [searchOutcome, namesOutcome]
+      .filter((o): o is PromiseRejectedResult => o.status === 'rejected')
+      .map(o => o.reason);
+    const accessError = rejections.find(e => e instanceof LoggedOutAccessEndedError)
+      ?? rejections.find(e => e instanceof CredentialsRequiredError);
+    if (accessError) {
+      throw accessError;
+    }
+    if (searchOutcome.status === 'rejected' && (candidates.length === 0 || namesOutcome.status === 'rejected')) {
+      throw searchOutcome.reason;
+    }
+
+    const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+    const notes: string[] = [];
+
+    const searchResults: FoundSubreddit[] = [];
+    const searchByName = new Map<string, FoundSubreddit>();
+    if (searchOutcome.status === 'fulfilled') {
+      for (const data of subredditRecords(searchOutcome.value.listing)) {
+        const shaped = shapeSubreddit(data, 'reddit_search', searchOutcome.value.fetched_at);
+        const key = shaped.name.toLowerCase();
+        if (!searchByName.has(key)) {
+          searchByName.set(key, shaped);
+          searchResults.push(shaped);
+        }
+      }
+    } else {
+      notes.push(`Reddit's subreddit search failed, so only your candidates are reported (${message(searchOutcome.reason)}).`);
+    }
+
+    const candidateResults: FoundSubreddit[] = [];
+    const notFound: string[] = [];
+    if (namesOutcome.status === 'fulfilled' && namesOutcome.value) {
+      const { listing, fetched_at } = namesOutcome.value;
+      const byName = new Map(subredditRecords(listing).map(data => [data.display_name.toLowerCase(), data]));
+      for (const name of candidates) {
+        const data = byName.get(name.toLowerCase());
+        const fromSearch = searchByName.get(name.toLowerCase());
+        if (data) {
+          candidateResults.push(shapeSubreddit(data, 'assistant', fetched_at));
+        } else if (fromSearch) {
+          candidateResults.push({ ...fromSearch, source: 'assistant' });
+        } else {
+          notFound.push(name);
+        }
+      }
+    } else if (namesOutcome.status === 'rejected') {
+      for (const name of candidates) {
+        const fromSearch = searchByName.get(name.toLowerCase());
+        candidateResults.push(fromSearch
+          ? { ...fromSearch, source: 'assistant' }
+          : {
+              name,
+              title: null,
+              description: null,
+              subscribers: null,
+              subscribers_as_of: null,
+              type: null,
+              nsfw: null,
+              source: 'assistant',
+              confirmed_exists: false,
+            });
+      }
+      notes.push(`Reddit's name check failed (${message(namesOutcome.reason)}). Candidates with confirmed_exists false were not checked; do not assume they exist.`);
+    }
+
+    if (notFound.length > 0) {
+      notes.push('Reddit returned nothing for the names in not_found. Treat them as unavailable: they may not exist, or may be banned or hidden. Do not browse or search them.');
+    }
+
+    const combined = [
+      ...candidateResults,
+      ...searchResults.filter(r => !seen.has(r.name.toLowerCase())),
+    ];
+    const shown = combined.filter(r => params.include_nsfw || r.nsfw !== true);
+    const hidden = combined.filter(r => !params.include_nsfw && r.nsfw === true);
+    const hiddenCandidates = hidden.filter(r => r.source === 'assistant').map(r => r.name);
+
+    const result: any = {
+      results: shown,
+      total_results: shown.length,
+      not_found: notFound,
+      nsfw_hidden: hidden.length,
+    };
+    if (hiddenCandidates.length > 0) {
+      result.nsfw_hidden_candidates = hiddenCandidates;
+    }
+    if (notes.length > 0) {
+      result.note = notes.join(' ');
+    }
+    return result;
+  }
 
   async redditExplain(params: z.infer<typeof redditExplainSchema>) {
     // This would ideally use a knowledge base, but we'll provide common explanations

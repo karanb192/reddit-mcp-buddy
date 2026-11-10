@@ -190,6 +190,7 @@ try {
     ['search_reddit', { query: 'test', subreddits: ['programming', 'javascript'] }],
     ['get_post_details', { post_id: 'abc123' }],
     ['user_analysis', { username: 'spez' }],
+    ['find_subreddits', { need: 'test', candidates: ['programming'] }],
   ]) {
     const response = await mcp.handlers['tools/call']({ name, arguments: args });
     assert.equal(response.isError, true, name);

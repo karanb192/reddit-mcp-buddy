@@ -38,6 +38,7 @@
     "search-posts",
     "get-comments",
     "user-analysis",
+    "find-subreddits",
     "reddit-terms",
     "create-posts",
     "add-comments",
@@ -59,6 +60,10 @@
     {
       "name": "user_analysis",
       "description": "Analyze a Reddit user's profile including karma, posting history, active subreddits, and activity patterns over different time ranges."
+    },
+    {
+      "name": "find_subreddits",
+      "description": "Find subreddits for a need and check candidate subreddit names in one call. Returns subscribers with an as-of time, NSFW flags, and names Reddit does not return. Needs Reddit API credentials."
     },
     {
       "name": "reddit_explain",

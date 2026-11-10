@@ -43,13 +43,13 @@ try {
   const valid = await shared();
   assert.equal(valid.writeStatus.enabled, true);
   assert.equal(valid.actingUser, identity);
-  assert.equal(await toolCount(valid), 8);
+  assert.equal(await toolCount(valid), 9);
   for (const missing of required) {
     scopes = required.filter(scope => scope !== missing).join(' ');
     const denied = await shared();
     assert.equal(denied.writeStatus.enabled, false);
     assert.match(denied.writeStatus.reason, /scopes/);
-    assert.equal(await toolCount(denied), 5);
+    assert.equal(await toolCount(denied), 6);
   }
   scopes = required.join(' ');
   process.env.REDDIT_USERNAME = 'another_user';
@@ -70,10 +70,10 @@ try {
 
   const before = refreshes;
   process.env.REDDIT_BUDDY_WRITE = 'false';
-  assert.equal(await toolCount(await shared()), 5);
+  assert.equal(await toolCount(await shared()), 6);
   process.env.REDDIT_BUDDY_WRITE = 'true';
   process.env.REDDIT_BUDDY_HTTP = 'true';
-  assert.equal(await toolCount(await shared()), 5);
+  assert.equal(await toolCount(await shared()), 6);
   assert.equal(refreshes, before, 'disabled and HTTP modes must not probe credentials');
   delete process.env.REDDIT_BUDDY_HTTP;
 

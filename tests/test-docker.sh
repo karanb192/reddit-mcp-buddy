@@ -53,7 +53,7 @@ curl --fail --silent --show-error --max-time 10 "$BASE_URL/mcp" \
   --data '{"jsonrpc":"2.0","method":"notifications/initialized"}' > /dev/null
 
 mcp_request '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
-  jq -e -s 'length == 1 and (.[0] | .id == 2 and .error == null and ([.result.tools[].name] | contains(["browse_subreddit", "search_reddit", "get_post_details", "user_analysis", "reddit_explain"])))' > /dev/null
+  jq -e -s 'length == 1 and (.[0] | .id == 2 and .error == null and ([.result.tools[].name] | contains(["browse_subreddit", "search_reddit", "get_post_details", "user_analysis", "find_subreddits", "reddit_explain"])))' > /dev/null
 echo 'MCP tool discovery passed'
 
 docker stop --time 15 "$CONTAINER" > /dev/null

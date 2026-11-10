@@ -27,6 +27,7 @@ import {
   getPostDetailsSchema,
   userAnalysisSchema,
   redditExplainSchema,
+  findSubredditsSchema,
 } from './tools/index.js';
 import {
   RedditWriteTools,
@@ -336,6 +337,7 @@ COMMON QUERIES:
 - "Search for AI discussions" → search_reddit with query="artificial intelligence"
 - "Get comments on a Reddit post" → get_post_details with URL or just post_id
 - "Analyze a Reddit user" → user_analysis with username
+- "Which subreddits cover X?" or a subreddit name you are unsure of → find_subreddits with need and your candidate names, before browsing or searching
 
 Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.${writeEnabled ? `
 
@@ -374,6 +376,12 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
       annotations: { readOnlyHint: true }
     },
     {
+      name: 'find_subreddits',
+      description: 'Find the right subreddits for a need and check subreddit names before you use them. Call this before browse_subreddit or search_reddit with any subreddit you are not sure exists. Give the user\'s need in words and up to 10 candidate names: candidates Reddit does not return come back in not_found, and Reddit\'s own subreddit search adds suggestions. Each result has subscribers with an as-of time, an nsfw flag, its source, and confirmed_exists. NSFW subreddits are left out unless include_nsfw is true. Needs Reddit API credentials.',
+      inputSchema: zodSchemaToMCPInputSchema(findSubredditsSchema, 'find_subreddits'),
+      annotations: { readOnlyHint: true }
+    },
+    {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
       inputSchema: zodSchemaToMCPInputSchema(redditExplainSchema, 'reddit_explain'),
@@ -382,7 +390,7 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
   ];
 
   // Write tools (v1.2.0): registered ONLY on the stdio path with write access
-  // proven at startup. Read-only installs see exactly the 5 tools above.
+  // proven at startup. Read-only installs see exactly the 6 tools above.
   // Descriptions stay tight: the 3 definitions together are held under a
   // 4000-char byte budget by a unit test (plan section 8).
   if (writeEnabled) {
@@ -474,6 +482,11 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
         case 'user_analysis':
           result = await tools.userAnalysis(
             userAnalysisSchema.parse(args)
+          );
+          break;
+        case 'find_subreddits':
+          result = await tools.findSubreddits(
+            findSubredditsSchema.parse(args)
           );
           break;
         case 'reddit_explain':

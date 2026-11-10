@@ -138,7 +138,7 @@ SERVER_JSON_VALID=$(node -e "
   const checks = [
     s.name === 'io.github.karanb192/reddit-mcp-buddy',
     Array.isArray(s.packages) && s.packages.length > 0,
-    Array.isArray(s.tools) && s.tools.length === 8,
+    Array.isArray(s.tools) && s.tools.length === 9,
     s.packages[0].transport.type === 'stdio',
     s.packages[0].registryType === 'npm',
     s.packages[0].identifier === 'reddit-mcp-buddy',
@@ -1330,7 +1330,7 @@ TOOLDEF_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   const { handlers } = await createMCPServer();
   const { tools } = await handlers["tools/list"]();
 
-  const t1 = tools.length === 5;
+  const t1 = tools.length === 6;
   // readOnlyHint belongs under annotations; at the top level clients drop it
   const t2 = tools.every(t => t.annotations && t.annotations.readOnlyHint === true);
   const t3 = tools.every(t => t.readOnlyHint === undefined);
@@ -1344,7 +1344,7 @@ TOOLDEF_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   const all = t1 && t2 && t3 && t4 && t5;
   console.log(all ? "pass" : "fail:" + JSON.stringify({t1,t2,t3,t4,t5}));
 ' 2>/dev/null)
-assert "Tool definitions: 5 tools, readOnlyHint under annotations, schemas intact" "echo \"\$TOOLDEF_RESULT\" | grep -q '^pass$'"
+assert "Tool definitions: 6 tools, readOnlyHint under annotations, schemas intact" "echo \"\$TOOLDEF_RESULT\" | grep -q '^pass$'"
 
 # --------------------------------------------------------------------------
 # 2y. Cache deleteByPrefix: write-through invalidation support (cache.ts) - NEW v1.2.0
@@ -1958,25 +1958,25 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   };
 
   // t0: full creds and a /me probe that WOULD succeed, but REDDIT_BUDDY_WRITE
-  // not set: the flag ALONE keeps the surface at 5 tools (plan decision 1,
+  // not set: the flag ALONE keeps the surface at 6 tools (plan decision 1,
   // off by default). If the flag check regressed, the probe would pass here
-  // and this stage would see 8 tools.
+  // and this stage would see 9 tools.
   setCreds();
   globalThis.fetch = eligibleFetch;
   const noFlag = await createSharedServices();
   const noFlagSrv = await createMCPServer(noFlag, { transport: "stdio" });
-  const t0 = (await noFlagSrv.handlers["tools/list"]()).tools.length === 5
+  const t0 = (await noFlagSrv.handlers["tools/list"]()).tools.length === 6
     && noFlag.writeStatus.enabled === false
     && noFlag.writeStatus.reason === "REDDIT_BUDDY_WRITE is not set";
 
-  // t1: write requested but NO credentials: 5 tools, reason names the failure
+  // t1: write requested but NO credentials: 6 tools, reason names the failure
   deleteCreds();
   process.env.REDDIT_BUDDY_WRITE = "true";
   globalThis.fetch = noNetwork;
   const bare = await createSharedServices();
   const bareSrv = await createMCPServer(bare, { transport: "stdio" });
   const bareTools = (await bareSrv.handlers["tools/list"]()).tools;
-  const t1 = bareTools.length === 5 && bare.writeStatus.enabled === false
+  const t1 = bareTools.length === 6 && bare.writeStatus.enabled === false
     && bare.writeStatus.reason.includes("credentials");
 
   // t2: HTTP mode env denies even with full creds (no /me probe attempted)
@@ -1985,7 +1985,7 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   const httpShared = await createSharedServices();
   const httpSrv = await createMCPServer(httpShared, { transport: "stdio" });
   const t2 = httpShared.writeStatus.enabled === false && httpShared.writeStatus.reason.includes("stdio")
-    && (await httpSrv.handlers["tools/list"]()).tools.length === 5;
+    && (await httpSrv.handlers["tools/list"]()).tools.length === 6;
   delete process.env.REDDIT_BUDDY_HTTP;
 
   // t2b: app-only credentials (no username/password) are denied by name:
@@ -1994,7 +1994,7 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   delete process.env.REDDIT_PASSWORD;
   const appOnly = await createSharedServices();
   const appOnlySrv = await createMCPServer(appOnly, { transport: "stdio" });
-  const t2b = (await appOnlySrv.handlers["tools/list"]()).tools.length === 5
+  const t2b = (await appOnlySrv.handlers["tools/list"]()).tools.length === 6
     && appOnly.writeStatus.enabled === false
     && appOnly.writeStatus.reason.includes("REDDIT_USERNAME");
   process.env.REDDIT_USERNAME = "testuser";
@@ -2047,14 +2047,14 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   globalThis.fetch = eligibleFetch;
   const shared = await createSharedServices();
 
-  // t3: stdio-hinted server exposes exactly 8 tools with the right annotations
+  // t3: stdio-hinted server exposes exactly 9 tools with the right annotations
   const stdio = await createMCPServer(shared, { transport: "stdio" });
-  const tools8 = (await stdio.handlers["tools/list"]()).tools;
-  const names = tools8.map(t => t.name);
-  const rulesDef = tools8.find(t => t.name === "subreddit_rules");
-  const postDef = tools8.find(t => t.name === "create_post");
-  const commentDef = tools8.find(t => t.name === "add_comment");
-  const t3 = tools8.length === 8 && shared.writeStatus.enabled === true && shared.actingUser === "testuser"
+  const stdioTools = (await stdio.handlers["tools/list"]()).tools;
+  const names = stdioTools.map(t => t.name);
+  const rulesDef = stdioTools.find(t => t.name === "subreddit_rules");
+  const postDef = stdioTools.find(t => t.name === "create_post");
+  const commentDef = stdioTools.find(t => t.name === "add_comment");
+  const t3 = stdioTools.length === 9 && shared.writeStatus.enabled === true && shared.actingUser === "testuser"
     && names.includes("create_post") && names.includes("add_comment") && names.includes("subreddit_rules")
     && rulesDef.annotations && rulesDef.annotations.readOnlyHint === true
     && (postDef.annotations === undefined || postDef.annotations.readOnlyHint !== true)
@@ -2064,8 +2064,8 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   // per-request path) never see write tools: belt and suspenders
   const noHint = await createMCPServer(shared);
   const httpHint = await createMCPServer(shared, { transport: "http" });
-  const t4 = (await noHint.handlers["tools/list"]()).tools.length === 5
-    && (await httpHint.handlers["tools/list"]()).tools.length === 5;
+  const t4 = (await noHint.handlers["tools/list"]()).tools.length === 6
+    && (await httpHint.handlers["tools/list"]()).tools.length === 6;
 
   // t5: CALLING a write tool on a non-stdio server is indistinguishable from
   // an unknown tool
@@ -2074,7 +2074,7 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
 
   // t6: byte budget: the 3 write tool defs must serialize under 4000 chars
   // (plan section 8: stops description creep from bloating the surface)
-  const writeDefs = tools8.filter(t => ["create_post", "add_comment", "subreddit_rules"].includes(t.name));
+  const writeDefs = stdioTools.filter(t => ["create_post", "add_comment", "subreddit_rules"].includes(t.name));
   const bytes = JSON.stringify(writeDefs).length;
   const t6 = writeDefs.length === 3 && bytes <= 4000;
 
@@ -2094,7 +2094,7 @@ WRITEREG_RESULT=$(HOME="$(mktemp -d)" node --input-type=module -e '
   const all = t0 && t1 && t2 && t2b && t2c && t2d && t2e && t3 && t4 && t5 && t6 && t7;
   console.log(all ? "pass" : "fail:" + JSON.stringify({t0,t1,t2,t2b,t2c,t2d,t2e,t3,t4,t5,t6,t7,bytes}));
 ' 2>/dev/null)
-assert "Registration gating: flag off by default, denial reasons by name, 8 tools only when eligible+stdio" "echo \"\$WRITEREG_RESULT\" | grep -q '^pass$'"
+assert "Registration gating: flag off by default, denial reasons by name, 9 tools only when eligible+stdio" "echo \"\$WRITEREG_RESULT\" | grep -q '^pass$'"
 
 # --------------------------------------------------------------------------
 # 2ae. Write pipeline: preflight, confirmation, verify, invalidation - NEW v1.2.0
@@ -2445,6 +2445,7 @@ assert "OAuth refresh auth: grants, scopes, credential isolation, and redacted f
 assert "OAuth consent CLI: loopback callback, state check, code exchange, scopes, and token file" "node tests/oauth-consent-unit.mjs"
 assert "Tool input: calls over 1000 array elements and object keys are refused before validation" "node tests/tool-input-unit.mjs"
 assert "Security: HTTP body limit counts bytes, upstream error text is capped" "node tests/security-unit.mjs"
+assert "find_subreddits: two requests, name check, NSFW filter, odd responses, cache, and the credentials error" "node tests/find-subreddits-unit.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS

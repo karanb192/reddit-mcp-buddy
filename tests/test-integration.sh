@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Integration tests for reddit-mcp-buddy
-# Tests HTTP server, live Reddit API (all 5 tools), edge cases, and stdio transport.
+# Tests HTTP server, live Reddit API (all 6 read tools), edge cases, and stdio transport.
 #
 # WARNING: Hits live Reddit API. Without credentials only RSS-backed browse checks run,
 # and only until Reddit ends RSS on 2026-11-13.
@@ -402,8 +402,8 @@ log_subsection "3d. MCP Protocol: tools/list"
 
 TOOLS_LIST=$(send_mcp_request "tools/list" "{}")
 
-# Check all 5 tools present
-for TOOL_NAME in browse_subreddit search_reddit get_post_details user_analysis reddit_explain; do
+# Check all 6 tools present
+for TOOL_NAME in browse_subreddit search_reddit get_post_details user_analysis find_subreddits reddit_explain; do
   assert_contains "tools/list contains $TOOL_NAME" "$TOOLS_LIST" "$TOOL_NAME"
 done
 
@@ -416,7 +416,7 @@ READONLY_COUNT=$(echo "$TOOLS_LIST" | node -e "
     console.log(count);
   });
 " 2>/dev/null)
-assert "All 5 tools have annotations.readOnlyHint=true" "[ '$READONLY_COUNT' = '5' ]"
+assert "All 6 tools have annotations.readOnlyHint=true" "[ '$READONLY_COUNT' = '6' ]"
 
 # Check schemas have proper structure (NEW zodSchemaToMCPInputSchema)
 SCHEMA_CHECK=$(echo "$TOOLS_LIST" | node -e "
@@ -747,6 +747,38 @@ assert_contains "reddit_explain brigading: works" "$EXPLAIN_BRIGADE" "manipulate
 EXPLAIN_UNKNOWN=$(call_tool "reddit_explain" '{"term":"xyzzyfoobarbaz"}')
 assert_contains "reddit_explain unknown term: graceful fallback" "$EXPLAIN_UNKNOWN" "not found"
 
+# --------------------------------------------------------------------------
+# 4f. find_subreddits (credentials only: no logged-out path)
+# --------------------------------------------------------------------------
+log_subsection "4f. find_subreddits"
+
+rate_limit_guard_double  # subreddit search + one name lookup
+FIND_SUBS=$(call_tool "find_subreddits" '{"need":"learning the python programming language","candidates":["learnpython","Python","notarealsubreddit999xyz"],"limit":5}')
+assert_contains_authed "find_subreddits: has results" "$FIND_SUBS" '"results"'
+FIND_CHECK=$(echo "$FIND_SUBS" | node -e "
+  let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+    try {
+      const o=JSON.parse(d);
+      const names=o.results.map(r=>r.name.toLowerCase());
+      const ok = names.includes('learnpython') && names.includes('python')
+        && o.not_found.includes('notarealsubreddit999xyz')
+        && o.results.every(r => r.confirmed_exists === true && typeof r.subscribers_as_of === 'string')
+        && o.results.some(r => r.source === 'reddit_search');
+      console.log(ok ? 'pass' : 'fail');
+    } catch (e) { console.log('fail'); }
+  });
+" 2>/dev/null)
+assert_authed "find_subreddits: candidates confirmed, unknown name in not_found, search suggestions added" "[ '$FIND_CHECK' = 'pass' ]"
+if [ "$HAS_CREDS" = "0" ]; then
+  FIND_LOGGED_OUT=$(call_tool "find_subreddits" '{"need":"python","candidates":["learnpython"]}')
+  if [ "$LOGGED_OUT_ENDED" = "1" ]; then
+    assert_logged_out_ended "find_subreddits without credentials" "$FIND_LOGGED_OUT"
+  else
+    assert_contains "find_subreddits without credentials: says credentials are needed" "$FIND_LOGGED_OUT" "existing approved Reddit API credentials"
+  fi
+  assert_not_contains "find_subreddits without credentials: no misleading not-found" "$FIND_LOGGED_OUT" "does not exist"
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 5: EDGE CASES & ERROR HANDLING
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -767,6 +799,9 @@ assert_contains "search_reddit: missing query → error" "$ERR_NO_QUERY" "_error
 
 ERR_NO_USER=$(call_tool "user_analysis" '{}')
 assert_contains "user_analysis: missing username → error" "$ERR_NO_USER" "_error\|Error\|error\|Required"
+
+ERR_NO_NEED=$(call_tool "find_subreddits" '{}')
+assert_contains "find_subreddits: missing need → error" "$ERR_NO_NEED" "_error\|Error\|error\|Required"
 
 ERR_NO_TERM=$(call_tool "reddit_explain" '{}')
 assert_contains "reddit_explain: missing term → error" "$ERR_NO_TERM" "_error\|Error\|error\|Required"
@@ -921,7 +956,8 @@ STDIO_RESULT=$(echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"pr
 
 assert_contains "Stdio: responds to initialize" "$STDIO_RESULT" '"serverInfo"'
 assert_contains "Stdio: returns tool list" "$STDIO_RESULT" '"browse_subreddit"'
-assert_contains "Stdio: returns all 5 tools" "$STDIO_RESULT" '"reddit_explain"'
+assert_contains "Stdio: returns all 6 tools" "$STDIO_RESULT" '"reddit_explain"'
+assert_contains "Stdio: lists find_subreddits" "$STDIO_RESULT" '"find_subreddits"'
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 7: LIVE WRITE TESTS (opt-in, never in PR CI)
