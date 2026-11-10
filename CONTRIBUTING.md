@@ -57,7 +57,6 @@ npm run typecheck     # Type checking
 
 # Testing
 npm run test:rate-limit         # Test rate limiting
-npm run test:rate-limit:anon    # Test anonymous mode (10 req/min)
 npm run test:rate-limit:app     # Test app-only mode (60 req/min)
 npm run test:rate-limit:auth    # Test authenticated mode (100 req/min)
 
@@ -70,14 +69,13 @@ npm run start:http    # Run in HTTP mode (for web clients)
 
 ### Rate Limit Testing
 
-Test the three-tier rate limiting system:
+Test the app-only and authenticated rate limits:
 
 ```bash
 # Test current environment settings
 node scripts/rate-limit-tester.cjs
 
 # Test specific modes with custom request counts
-node scripts/rate-limit-tester.cjs anonymous 15    # Test 15 requests in anonymous mode
 node scripts/rate-limit-tester.cjs app-only 70     # Test 70 requests in app-only mode
 node scripts/rate-limit-tester.cjs auth 120        # Test 120 requests in authenticated mode
 ```

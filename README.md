@@ -369,7 +369,6 @@ npm install
 npm run test:rate-limit
 
 # Test specific authentication modes
-npm run test:rate-limit:anon    # Test anonymous mode (10 rpm)
 npm run test:rate-limit:app     # Test app-only mode (60 rpm)
 npm run test:rate-limit:auth    # Test authenticated mode (100 rpm)
 ```
@@ -696,7 +695,6 @@ npm run test:all             # All tests
 
 # Test rate limits
 npm run test:rate-limit       # Test with current environment
-npm run test:rate-limit:anon  # Test anonymous mode (10 rpm)
 npm run test:rate-limit:app   # Test app-only mode (60 rpm)
 npm run test:rate-limit:auth  # Test authenticated mode (100 rpm)
 

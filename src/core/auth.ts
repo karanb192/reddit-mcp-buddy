@@ -496,41 +496,4 @@ export class AuthManager {
            typeof config.clientId === 'string' && config.clientId.length > 0 &&
            typeof config.clientSecret === 'string' && config.clientSecret.length > 0;
   }
-
-  /**
-   * Setup wizard for authentication
-   */
-  static async runSetupWizard(): Promise<AuthConfig> {
-    console.log('\n🚀 Reddit MCP Buddy Authentication Setup\n');
-    console.log('This will help you set up authentication for 10x more requests.\n');
-    
-    console.log('Step 1: Create a Reddit App');
-    console.log('  1. Go to: https://www.reddit.com/prefs/apps');
-    console.log('  2. Click "Create App" or "Create Another App"');
-    console.log('  3. Fill in the following:');
-    console.log('     - Name: Reddit MCP Buddy (or anything you like)');
-    console.log('     - App type: Select "script"');
-    console.log('     - Description: Personal use');
-    console.log('     - About URL: (leave blank)');
-    console.log('     - Redirect URI: http://localhost:8080');
-    console.log('  4. Click "Create app"\n');
-    
-    console.log('Step 2: Copy your Client ID');
-    console.log('  - Find it under "personal use script"');
-    console.log('  - It looks like: XaBcDeFgHiJkLm\n');
-    
-    // In a real implementation, we'd use a prompt library here
-    console.log('Please enter your Client ID and press Enter:');
-    
-    // This is a placeholder - in real implementation, use readline or a prompt library
-    const clientId = 'YOUR_CLIENT_ID_HERE';
-    
-    // Validate client ID format
-    if (!/^[A-Za-z0-9_-]{10,30}$/.test(clientId)) {
-      throw new Error('Invalid Client ID format');
-    }
-    
-    // This method is deprecated - use CLI setup instead
-    throw new Error('Please use "reddit-mcp-buddy --auth" for authentication setup');
-  }
 }

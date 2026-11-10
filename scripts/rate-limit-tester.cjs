@@ -3,8 +3,7 @@
 /**
  * Rate Limit Testing Script for Reddit MCP Buddy
  *
- * This script tests the three-tier rate limiting system:
- * - Anonymous: 10 requests/minute
+ * This script tests the server's local rate limits:
  * - App-only: 60 requests/minute
  * - Authenticated: 100 requests/minute
  *
@@ -13,7 +12,6 @@
  *
  * Examples:
  *   node scripts/test-rate-limit.js              # Test current auth mode
- *   node scripts/test-rate-limit.js anonymous 15 # Test anonymous mode with 15 requests
  *   node scripts/test-rate-limit.js app-only 70  # Test app-only mode with 70 requests
  *   node scripts/test-rate-limit.js auth 120     # Test authenticated mode with 120 requests
  */
@@ -60,11 +58,6 @@ const requestCount = parseInt(args[1]) || 15;
 
 // Test configuration
 const testConfig = {
-  anonymous: {
-    env: {},
-    expectedLimit: 10,
-    description: 'Anonymous mode (no auth)',
-  },
   'app-only': {
     env: {
       REDDIT_CLIENT_ID: process.env.REDDIT_CLIENT_ID || 'test_client_id',
@@ -98,14 +91,15 @@ if (mode === 'current') {
   } else if (process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET) {
     testConfig.current.expectedLimit = 60;
   } else {
-    testConfig.current.expectedLimit = 10;
+    console.error(`${colors.red}REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET are required${colors.reset}`);
+    process.exit(1);
   }
 }
 
 const config = testConfig[mode];
 if (!config) {
   console.error(`${colors.red}Invalid mode: ${mode}${colors.reset}`);
-  console.error('Valid modes: anonymous, app-only, auth, current');
+  console.error('Valid modes: app-only, auth, current');
   process.exit(1);
 }
 
