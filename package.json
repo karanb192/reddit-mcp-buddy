@@ -11,9 +11,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && (chmod +x dist/cli.js 2>/dev/null || true)",
+    "build": "tsc && node -e \"try { require('fs').chmodSync('dist/cli.js', 0o755) } catch {}\"",
     "start": "node dist/index.js",
-    "start:http": "REDDIT_BUDDY_HTTP=true node dist/index.js",
+    "start:http": "node -e \"process.env.REDDIT_BUDDY_HTTP='true'; import('./dist/index.js')\"",
     "test": "bash tests/test-unit.sh",
     "test:coverage": "npm run build && c8 --include=dist/core/write-gate.js --include=dist/services/write-errors.js --include=dist/tools/write.js --check-coverage --lines 100 --functions 100 --statements 100 --branches 100 --per-file --reporter=text node tests/write-unit.mjs",
     "test:integration": "bash tests/test-integration.sh",
