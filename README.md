@@ -106,6 +106,7 @@ Ask your AI assistant to:
 - 🔍 **"Search for discussions about AI"** - Search across all subreddits
 - 💬 **"Get comments from this Reddit post"** - Fetch post with full comment threads
 - 👤 **"Analyze user spez"** - Get user history, karma, and activity
+- 🧭 **"Which subreddits talk about home espresso?"** - Check subreddit names and get Reddit's own suggestions
 - 📚 **"Explain Reddit karma"** - Understand Reddit terminology
 - ✍️ **"Post this to r/test"** - Draft, check the sub's rules, and submit after you confirm (opt-in, see [Posting](#posting-v120))
 
@@ -157,6 +158,24 @@ Analyze a Reddit user's profile.
 - Returns: karma, posts, comments, active subreddits
 ```
 
+### `find_subreddits`
+Find subreddits for a topic, and check subreddit names before using them.
+```
+- Query: 2 to 4 keywords, not a sentence (Reddit's subreddit search matches words)
+- Candidates: up to 10 subreddit names the assistant thinks fit (optional)
+- Include NSFW: off by default
+- Limit: how many Reddit search suggestions to return (default 10, max 50)
+- Min subscribers: search suggestions below this are left out (default 1000);
+  candidates are never filtered by size
+- Returns: name, url, title, description, subscribers with an as-of time, NSFW flag, type,
+  source (assistant or reddit_search), and whether it was confirmed to exist
+- Candidates Reddit does not return are listed in not_found; if the name check itself
+  fails, they come back unchecked instead
+- Subreddits that exist but cannot be read (private, quarantined, banned) are listed
+  in unavailable with the reason
+- Needs credentials; at most 2 Reddit requests per call
+```
+
 ### `reddit_explain`
 Get explanations of Reddit terms.
 ```
@@ -165,7 +184,7 @@ Get explanations of Reddit terms.
 
 ### Write tools (opt-in)
 
-`create_post`, `add_comment`, and `subreddit_rules` only appear when you enable posting; read-only installs see exactly the five tools above. Details in [Posting (v1.2.0)](#posting-v120).
+`create_post`, `add_comment`, and `subreddit_rules` only appear when you enable posting; read-only installs see exactly the six tools above. Details in [Posting (v1.2.0)](#posting-v120).
 
 ## Authentication
 
@@ -298,7 +317,7 @@ Credentials must come from environment variables (or extension config fields, wh
 
 Posting uses your account. The server enforces registration, rate limits, and duplicate checks; human approval also depends on the client:
 
-- **Off by default.** Without `REDDIT_BUDDY_WRITE`, the write tools do not exist: read-only installs see exactly the same 5 tools as before, and pay zero extra context.
+- **Off by default.** Without `REDDIT_BUDDY_WRITE`, the write tools do not exist: read-only installs see only the 6 read tools, and pay zero extra context.
 - **stdio only.** The HTTP transport has no authentication, so write tools refuse to register there. No process on your machine or network can turn the HTTP endpoint into a posting proxy.
 - **Confirmation depends on the client.** Clients supporting [MCP elicitation](https://modelcontextprotocol.io/specification/latest) get a confirmation prompt with the target, account, content preview, full content length, and post options. The prompt requires an explicit acceptance. Previews can be truncated, so review the full draft in your client first. Without elicitation, the server requires a preview or successful dry run followed by the identical payload within 15 minutes. It cannot verify that a human approved that repeat: approval depends on the client's tool prompt and the model following instructions. Only enable posting in a client whose approval behavior you trust.
 - **Hourly caps you cannot raise.** At most 5 posts/hour, 30 comments/hour, and 15 seconds between writes, enforced in the server. Environment variables can tighten these, never loosen them. Honest limit: the caps live in the server process (a restart resets the hour, parallel sessions have separate caps, and a fork of this open-source code can remove them). They exist to make casual abuse pointless, not to stop a determined operator.
@@ -483,7 +502,7 @@ cd reddit-mcp-buddy
 |---------|-------------|----------------|
 | **Credentials** | Existing approved Reddit API access required | Varies by server |
 | **Language** | TypeScript/Node.js | Python (most) |
-| **Tools Count** | 5 read + 3 opt-in write | 8-10 (redundant) |
+| **Tools Count** | 6 read + 3 opt-in write | 8-10 (redundant) |
 | **Fake Metrics** | ✅ Real data only | ❌ "Sentiment scores" |
 | **Search** | ✅ Full search | Limited or none |
 | **Caching** | ✅ Smart caching | Usually none |
@@ -535,6 +554,11 @@ cd reddit-mcp-buddy
 **"Analyze the user DeepFuckingValue"**
 ```
 → user_analysis with username="DeepFuckingValue"
+```
+
+**"Where do people discuss home espresso machines?"**
+```
+→ find_subreddits with query="home espresso", candidates=["espresso", "Coffee"]
 ```
 
 **"Get the comments from this Reddit post"**

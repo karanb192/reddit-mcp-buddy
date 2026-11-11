@@ -113,6 +113,26 @@ export class LoggedOutAccessEndedError extends Error {
   }
 }
 
+export const CREDENTIALS_REQUIRED_MESSAGE =
+  'This tool has no logged-out mode. It needs ' + CREDENTIALS_NEEDED +
+  ' This is not a problem with the subreddit names or topic you asked about.';
+
+/** A credentials-only read was called without credentials. Raised before any cache read or request. */
+export class CredentialsRequiredError extends Error {
+  readonly status = 403;
+
+  constructor() {
+    super(CREDENTIALS_REQUIRED_MESSAGE);
+    this.name = 'CredentialsRequiredError';
+  }
+}
+
+/** A Reddit response together with the time it was fetched, so callers can say how fresh it is. */
+export interface FetchedListing<T> {
+  fetched_at: number;
+  listing: RedditListing<T>;
+}
+
 // Appended to logged-out RSS failures before the cutoff, in case Reddit turns the feeds off early.
 const RSS_ENDING_NOTE =
   ' If every subreddit fails this way, Reddit may already have ended logged-out RSS access ' +
@@ -174,6 +194,14 @@ export class RedditAPI {
   private assertLoggedOutAccessOpen(): void {
     if (this.loggedOutAccessEnded()) {
       throw new LoggedOutAccessEndedError();
+    }
+  }
+
+  // The shutdown check runs first so that after the cutoff every logged-out read reports the same error.
+  private assertCredentialed(): void {
+    this.assertLoggedOutAccessOpen();
+    if (!this.auth.isAuthenticated()) {
+      throw new CredentialsRequiredError();
     }
   }
 
@@ -731,6 +759,59 @@ export class RedditAPI {
     this.cache.set(cacheKey, subreddit);
     
     return subreddit;
+  }
+
+  /**
+   * Reddit's own subreddit search (GET /subreddits/search). Credentials only.
+   */
+  async searchSubreddits(query: string, limit: number = 10, includeNsfw: boolean = false): Promise<FetchedListing<RedditSubreddit>> {
+    this.assertCredentialed();
+    const cacheKey = CacheManager.createKey('subreddit-search', query, limit, includeNsfw ? 'nsfw' : 'sfw');
+    const cached = this.cache.get<FetchedListing<RedditSubreddit>>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const params = new URLSearchParams({
+      q: query,
+      limit: String(limit),
+      raw_json: '1',
+    });
+    // Reddit leaves NSFW subreddits out of this search unless asked (checked live, 2026-11-11).
+    if (includeNsfw) {
+      params.set('include_over_18', 'on');
+    }
+    const listing = await this.get<RedditListing<RedditSubreddit>>(
+      `/subreddits/search.json?${params.toString()}`
+    );
+
+    const result = { fetched_at: Date.now(), listing };
+    this.cache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * Look up subreddits by exact name in one request (GET /api/info?sr_name=a,b,c, at most 100 names).
+   * Names Reddit does not return are absent from the listing. Credentials only.
+   */
+  async getSubredditsByName(names: string[]): Promise<FetchedListing<RedditSubreddit>> {
+    this.assertCredentialed();
+    if (names.length === 0 || names.length > 100) {
+      throw new Error('Subreddit name lookup takes 1 to 100 names');
+    }
+    const cacheKey = CacheManager.createKey('subreddit-names', ...[...names].map(n => n.toLowerCase()).sort());
+    const cached = this.cache.get<FetchedListing<RedditSubreddit>>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const listing = await this.get<RedditListing<RedditSubreddit>>(
+      `/api/info.json?sr_name=${names.map(n => encodeURIComponent(n)).join(',')}&raw_json=1`
+    );
+
+    const result = { fetched_at: Date.now(), listing };
+    this.cache.set(cacheKey, result);
+    return result;
   }
 
   /**

@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { RedditAPI, RSS_UNKNOWN_SCORE, LoggedOutAccessEndedError } from '../services/reddit-api.js';
+import { RedditAPI, RSS_UNKNOWN_SCORE, LoggedOutAccessEndedError, CredentialsRequiredError } from '../services/reddit-api.js';
 import { ContentProcessor } from '../services/content-processor.js';
 import { RedditListing, RedditPost } from '../types/reddit.types.js';
 
@@ -75,6 +75,85 @@ export const userAnalysisSchema = z.object({
 export const redditExplainSchema = z.object({
   term: z.string().describe('Reddit term to explain (e.g., "karma", "cake day", "AMA")'),
 });
+
+// Each candidate is looked up as one name. Anything else (a multireddit path such as a+b, a name
+// too long to exist) is reported as not found without being sent to Reddit.
+const PLAIN_SUBREDDIT_RE = /^[A-Za-z0-9_]{2,21}$/;
+
+export const findSubredditsSchema = z.object({
+  query: z.string().trim().min(1).max(512)
+    .describe('2 to 4 keywords for the topic, as you would type them in a search box (e.g., "budget cooking", "mechanical keyboards"). NOT a sentence: Reddit matches words, so long phrases return unrelated subreddits.'),
+  candidates: z.array(
+    z.string().max(100).transform(s => s.trim().replace(/^\/?r\//i, ''))
+  ).max(10).optional()
+    .describe('Up to 10 subreddit names you think fit, without r/. Each is checked against Reddit; names Reddit does not return come back in not_found.'),
+  include_nsfw: z.boolean().optional().default(false)
+    .describe('Default false: NSFW subreddits are left out and counted in nsfw_hidden. Set true ONLY IF the user asks for NSFW communities.'),
+  limit: z.number().int().min(1).max(50).optional().default(10).describe('Default 10, range (1-50). Most Reddit search suggestions to return. Change ONLY IF user asks.'),
+  min_subscribers: z.number().int().min(0).optional().default(1000)
+    .describe('Default 1000. Search suggestions with fewer subscribers are left out and counted in small_hidden; your candidates are never filtered by size. Lower it ONLY IF the user wants niche or new communities.'),
+});
+
+type SubredditSource = 'assistant' | 'reddit_search';
+type UnavailableReason = 'private' | 'quarantined' | 'banned_or_restricted';
+
+interface FoundSubreddit {
+  name: string;
+  url: string | null;
+  title: string | null;
+  description: string | null;
+  subscribers: number | null;
+  subscribers_as_of: string | null;
+  type: string | null;
+  nsfw: boolean | null;
+  source: SubredditSource;
+  confirmed_exists: boolean;
+}
+
+// A search query longer than this is treated as a sentence and gets a note.
+const KEYWORD_QUERY_MAX_WORDS = 5;
+
+/**
+ * Pull subreddit records out of a Reddit listing without trusting its shape:
+ * a missing listing, null children, non-t5 kinds and records without a name are skipped.
+ */
+function subredditRecords(listing: unknown): any[] {
+  const children = (listing as any)?.data?.children;
+  if (!Array.isArray(children)) return [];
+  return children
+    .filter(child => child?.kind === 't5' && child.data && typeof child.data.display_name === 'string' && child.data.display_name.length > 0)
+    .map(child => child.data);
+}
+
+/**
+ * Reddit still returns a record for a subreddit the token cannot read, with its counts and flags
+ * nulled (checked live, 2026-11-11): a private one keeps subreddit_type "private", a quarantined
+ * one carries quarantine fields, and a banned one has neither.
+ */
+function unavailableReason(data: any): UnavailableReason | null {
+  if (data.subreddit_type === 'private') return 'private';
+  if (data.quarantine === true || 'quarantine_message' in data) return 'quarantined';
+  if (data.subscribers == null && data.over18 == null) return 'banned_or_restricted';
+  return null;
+}
+
+function shapeSubreddit(data: any, source: SubredditSource, fetchedAt: number): FoundSubreddit {
+  const description = typeof data.public_description === 'string' && data.public_description.trim()
+    ? data.public_description.trim()
+    : null;
+  return {
+    name: data.display_name,
+    url: `https://www.reddit.com/r/${encodeURIComponent(data.display_name)}/`,
+    title: typeof data.title === 'string' && data.title ? data.title : null,
+    description: description ? description.substring(0, 300) : null,
+    subscribers: typeof data.subscribers === 'number' && Number.isFinite(data.subscribers) ? data.subscribers : null,
+    subscribers_as_of: new Date(fetchedAt).toISOString(),
+    type: typeof data.subreddit_type === 'string' ? data.subreddit_type : null,
+    nsfw: typeof data.over18 === 'boolean' ? data.over18 : null,
+    source,
+    confirmed_exists: true,
+  };
+}
 
 /**
  * Shape RSS-sourced posts for consumption by an LLM.
@@ -541,6 +620,168 @@ export class RedditTools {
 
 
 
+
+  async findSubreddits(params: z.infer<typeof findSubredditsSchema>) {
+    const candidates: string[] = [];
+    const seen = new Set<string>();
+    const invalidNames: string[] = [];
+    for (const name of params.candidates ?? []) {
+      if (seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      (PLAIN_SUBREDDIT_RE.test(name) ? candidates : invalidNames).push(name);
+    }
+
+    // Ask for more than the limit, since small and NSFW suggestions are dropped before the cut.
+    const searchSize = Math.min(100, params.limit * 3);
+    const [searchOutcome, namesOutcome] = await Promise.allSettled([
+      this.api.searchSubreddits(params.query, searchSize, params.include_nsfw),
+      candidates.length > 0 ? this.api.getSubredditsByName(candidates) : Promise.resolve(null),
+    ]);
+
+    // Access-wide failures win over partial results, so the caller is never sent off to try other names.
+    const rejections = [searchOutcome, namesOutcome]
+      .filter((o): o is PromiseRejectedResult => o.status === 'rejected')
+      .map(o => o.reason);
+    const accessError = rejections.find(e => e instanceof LoggedOutAccessEndedError)
+      ?? rejections.find(e => e instanceof CredentialsRequiredError);
+    if (accessError) {
+      throw accessError;
+    }
+    if (searchOutcome.status === 'rejected' && (candidates.length === 0 || namesOutcome.status === 'rejected')) {
+      throw searchOutcome.reason;
+    }
+
+    const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+    const notes: string[] = [];
+    const unavailable: { name: string; reason: UnavailableReason }[] = [];
+    const unavailableNames = new Set<string>();
+    const markUnavailable = (name: string, reason: UnavailableReason) => {
+      if (!unavailableNames.has(name.toLowerCase())) {
+        unavailableNames.add(name.toLowerCase());
+        unavailable.push({ name, reason });
+      }
+    };
+
+    const searchResults: FoundSubreddit[] = [];
+    const searchByName = new Map<string, FoundSubreddit>();
+    // An unreadable subreddit in the search is named only if the caller asked about it by name:
+    // the tool does not point at banned or quarantined subreddits nobody mentioned.
+    const unreadableInSearch = new Map<string, { name: string; reason: UnavailableReason }>();
+    if (searchOutcome.status === 'fulfilled') {
+      for (const data of subredditRecords(searchOutcome.value.listing)) {
+        const key = data.display_name.toLowerCase();
+        const reason = unavailableReason(data);
+        if (reason) {
+          unreadableInSearch.set(key, { name: data.display_name, reason });
+          continue;
+        }
+        if (searchByName.has(key)) continue;
+        const shaped = shapeSubreddit(data, 'reddit_search', searchOutcome.value.fetched_at);
+        searchByName.set(key, shaped);
+        searchResults.push(shaped);
+      }
+    } else {
+      notes.push(`Reddit's subreddit search failed, so only your candidates are reported (${message(searchOutcome.reason)}).`);
+    }
+
+    const candidateResults: FoundSubreddit[] = [];
+    const notFound: string[] = [...invalidNames];
+    if (namesOutcome.status === 'fulfilled' && namesOutcome.value) {
+      const { listing, fetched_at } = namesOutcome.value;
+      const byName = new Map(subredditRecords(listing).map(data => [data.display_name.toLowerCase(), data]));
+      for (const name of candidates) {
+        const data = byName.get(name.toLowerCase());
+        const fromSearch = searchByName.get(name.toLowerCase());
+        const reason = data ? unavailableReason(data) : null;
+        if (data && reason) {
+          markUnavailable(data.display_name, reason);
+        } else if (data) {
+          candidateResults.push(shapeSubreddit(data, 'assistant', fetched_at));
+        } else if (fromSearch) {
+          candidateResults.push({ ...fromSearch, source: 'assistant' });
+        } else if (unreadableInSearch.has(name.toLowerCase())) {
+          const unreadable = unreadableInSearch.get(name.toLowerCase())!;
+          markUnavailable(unreadable.name, unreadable.reason);
+        } else {
+          notFound.push(name);
+        }
+      }
+    } else if (namesOutcome.status === 'rejected') {
+      for (const name of candidates) {
+        const fromSearch = searchByName.get(name.toLowerCase());
+        const unreadable = unreadableInSearch.get(name.toLowerCase());
+        if (unreadable) {
+          markUnavailable(unreadable.name, unreadable.reason);
+          continue;
+        }
+        candidateResults.push(fromSearch
+          ? { ...fromSearch, source: 'assistant' }
+          : {
+              name,
+              url: null,
+              title: null,
+              description: null,
+              subscribers: null,
+              subscribers_as_of: null,
+              type: null,
+              nsfw: null,
+              source: 'assistant',
+              confirmed_exists: false,
+            });
+      }
+      notes.push(`Reddit's name check failed (${message(namesOutcome.reason)}). Candidates with confirmed_exists false were not checked; do not assume they exist.`);
+    }
+
+    const hideNsfw = (r: FoundSubreddit) => !params.include_nsfw && r.nsfw === true;
+    const shownCandidates = candidateResults.filter(r => !hideNsfw(r));
+    const hiddenCandidates = candidateResults.filter(hideNsfw).map(r => r.name);
+
+    const suggestions = searchResults.filter(r => !seen.has(r.name.toLowerCase()));
+    const sfwSuggestions = suggestions.filter(r => !hideNsfw(r));
+    const bigEnough = sfwSuggestions.filter(r => r.subscribers === null || r.subscribers >= params.min_subscribers);
+    const shownSuggestions = bigEnough.slice(0, params.limit);
+    const nsfwHidden = hiddenCandidates.length + (suggestions.length - sfwSuggestions.length);
+    const smallHidden = sfwSuggestions.length - bigEnough.length;
+
+    if (notFound.length > invalidNames.length) {
+      notes.push('Reddit returned nothing for the names in not_found. Treat them as not existing: do not browse or search them.');
+    }
+    if (invalidNames.length > 0) {
+      notes.push(`Not checked, because a subreddit name is 2 to 21 letters, numbers or underscores: ${invalidNames.join(', ')}.`);
+    }
+    if (unavailable.length > 0) {
+      notes.push('The names in unavailable exist but cannot be read with these credentials. Do not browse or search them.');
+    }
+    const isSentence = params.query.split(/\s+/).length > KEYWORD_QUERY_MAX_WORDS;
+    if (searchOutcome.status === 'fulfilled' && shownSuggestions.length === 0) {
+      if (smallHidden > 0) {
+        notes.push(`Reddit's subreddit search returned only small subreddits for this query (${smallHidden} under ${params.min_subscribers} subscribers). Try other keywords, or lower min_subscribers if the user wants niche communities.`);
+      } else if (isSentence) {
+        notes.push("Reddit's subreddit search returned nothing because this query reads like a sentence and it matches words. Retry with 2 to 4 keywords.");
+      } else {
+        notes.push("Reddit's subreddit search returned nothing for this query. It matches words: try 2 to 4 different keywords, or pass likely subreddit names as candidates.");
+      }
+    } else if (isSentence) {
+      notes.push("This query reads like a sentence. Reddit's subreddit search matches words, so the suggestions may be off topic: retry with 2 to 4 keywords if they do not fit.");
+    }
+
+    const shown = [...shownCandidates, ...shownSuggestions];
+    const result: any = {
+      results: shown,
+      total_results: shown.length,
+      not_found: notFound,
+      unavailable,
+      nsfw_hidden: nsfwHidden,
+      small_hidden: smallHidden,
+    };
+    if (hiddenCandidates.length > 0) {
+      result.nsfw_hidden_candidates = hiddenCandidates;
+    }
+    if (notes.length > 0) {
+      result.note = notes.join(' ');
+    }
+    return result;
+  }
 
   async redditExplain(params: z.infer<typeof redditExplainSchema>) {
     // This would ideally use a knowledge base, but we'll provide common explanations

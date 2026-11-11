@@ -27,6 +27,7 @@ import {
   getPostDetailsSchema,
   userAnalysisSchema,
   redditExplainSchema,
+  findSubredditsSchema,
 } from './tools/index.js';
 import {
   RedditWriteTools,
@@ -336,6 +337,7 @@ COMMON QUERIES:
 - "Search for AI discussions" → search_reddit with query="artificial intelligence"
 - "Get comments on a Reddit post" → get_post_details with URL or just post_id
 - "Analyze a Reddit user" → user_analysis with username
+- "Which subreddits cover X?" or a subreddit name you are unsure of → find_subreddits with query (2 to 4 keywords) and your candidate names, before browsing or searching
 
 Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.${writeEnabled ? `
 
@@ -374,6 +376,12 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
       annotations: { readOnlyHint: true }
     },
     {
+      name: 'find_subreddits',
+      description: 'Find subreddits for a topic and check subreddit names before you use them. Call this before browse_subreddit or search_reddit with any subreddit you are not sure exists. Give query as 2 to 4 keywords (not a sentence) and up to 10 candidate names. results: your confirmed candidates first, then Reddit\'s own search suggestions, each with a url, subscribers with an as-of time, an nsfw flag, its type (restricted means most accounts cannot post there) and its source. not_found: candidates Reddit did not return, or that are not valid names. unavailable: names that exist but are private, quarantined or banned; do not browse those. If the name check itself fails, candidates come back with confirmed_exists false, meaning unchecked. NSFW subreddits and suggestions under min_subscribers are left out and counted. Needs Reddit API credentials.',
+      inputSchema: zodSchemaToMCPInputSchema(findSubredditsSchema, 'find_subreddits'),
+      annotations: { readOnlyHint: true }
+    },
+    {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
       inputSchema: zodSchemaToMCPInputSchema(redditExplainSchema, 'reddit_explain'),
@@ -382,7 +390,7 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
   ];
 
   // Write tools (v1.2.0): registered ONLY on the stdio path with write access
-  // proven at startup. Read-only installs see exactly the 5 tools above.
+  // proven at startup. Read-only installs see exactly the 6 tools above.
   // Descriptions stay tight: the 3 definitions together are held under a
   // 4000-char byte budget by a unit test (plan section 8).
   if (writeEnabled) {
@@ -474,6 +482,11 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
         case 'user_analysis':
           result = await tools.userAnalysis(
             userAnalysisSchema.parse(args)
+          );
+          break;
+        case 'find_subreddits':
+          result = await tools.findSubreddits(
+            findSubredditsSchema.parse(args)
           );
           break;
         case 'reddit_explain':
