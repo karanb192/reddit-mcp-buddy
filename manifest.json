@@ -52,7 +52,7 @@
     },
     {
       "name": "find_subreddits",
-      "description": "Find subreddits for a need and check subreddit names before browsing or searching them"
+      "description": "Find subreddits for a topic and check subreddit names before browsing or searching them"
     },
     {
       "name": "reddit_explain",

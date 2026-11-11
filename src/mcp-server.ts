@@ -337,7 +337,7 @@ COMMON QUERIES:
 - "Search for AI discussions" → search_reddit with query="artificial intelligence"
 - "Get comments on a Reddit post" → get_post_details with URL or just post_id
 - "Analyze a Reddit user" → user_analysis with username
-- "Which subreddits cover X?" or a subreddit name you are unsure of → find_subreddits with need and your candidate names, before browsing or searching
+- "Which subreddits cover X?" or a subreddit name you are unsure of → find_subreddits with query (2 to 4 keywords) and your candidate names, before browsing or searching
 
 Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.${writeEnabled ? `
 
@@ -377,7 +377,7 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
     },
     {
       name: 'find_subreddits',
-      description: 'Find the right subreddits for a need and check subreddit names before you use them. Call this before browse_subreddit or search_reddit with any subreddit you are not sure exists. Give the user\'s need in words and up to 10 candidate names: when the name check succeeds, candidates Reddit did not return come back in not_found; when it fails, they come back with confirmed_exists false, meaning unchecked. Reddit\'s own subreddit search adds suggestions. Each result has a url, subscribers with an as-of time, an nsfw flag, its type (a private subreddit cannot be browsed), its source, and confirmed_exists. NSFW subreddits are left out unless include_nsfw is true. Needs Reddit API credentials.',
+      description: 'Find subreddits for a topic and check subreddit names before you use them. Call this before browse_subreddit or search_reddit with any subreddit you are not sure exists. Give query as 2 to 4 keywords (not a sentence) and up to 10 candidate names. results: your confirmed candidates first, then Reddit\'s own search suggestions, each with a url, subscribers with an as-of time, an nsfw flag, its type (restricted means most accounts cannot post there) and its source. not_found: candidates Reddit did not return, or that are not valid names. unavailable: names that exist but are private, quarantined or banned; do not browse those. If the name check itself fails, candidates come back with confirmed_exists false, meaning unchecked. NSFW subreddits and suggestions under min_subscribers are left out and counted. Needs Reddit API credentials.',
       inputSchema: zodSchemaToMCPInputSchema(findSubredditsSchema, 'find_subreddits'),
       annotations: { readOnlyHint: true }
     },

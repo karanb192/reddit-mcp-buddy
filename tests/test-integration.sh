@@ -753,7 +753,7 @@ assert_contains "reddit_explain unknown term: graceful fallback" "$EXPLAIN_UNKNO
 log_subsection "4f. find_subreddits"
 
 rate_limit_guard_double  # subreddit search + one name lookup
-FIND_SUBS=$(call_tool "find_subreddits" '{"need":"learning the python programming language","candidates":["learnpython","Python","notarealsubreddit999xyz"],"limit":5}')
+FIND_SUBS=$(call_tool "find_subreddits" '{"query":"learn python","candidates":["learnpython","Python","notarealsubreddit999xyz"],"limit":5}')
 assert_contains_authed "find_subreddits: has results" "$FIND_SUBS" '"results"'
 FIND_CHECK=$(echo "$FIND_SUBS" | node -e "
   let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
@@ -762,6 +762,7 @@ FIND_CHECK=$(echo "$FIND_SUBS" | node -e "
       const names=o.results.map(r=>r.name.toLowerCase());
       const ok = names.includes('learnpython') && names.includes('python')
         && o.not_found.includes('notarealsubreddit999xyz')
+        && Array.isArray(o.unavailable)
         && o.results.every(r => r.confirmed_exists === true && typeof r.subscribers_as_of === 'string')
         && o.results.some(r => r.source === 'reddit_search');
       console.log(ok ? 'pass' : 'fail');
@@ -770,7 +771,7 @@ FIND_CHECK=$(echo "$FIND_SUBS" | node -e "
 " 2>/dev/null)
 assert_authed "find_subreddits: candidates confirmed, unknown name in not_found, search suggestions added" "[ '$FIND_CHECK' = 'pass' ]"
 if [ "$HAS_CREDS" = "0" ]; then
-  FIND_LOGGED_OUT=$(call_tool "find_subreddits" '{"need":"python","candidates":["learnpython"]}')
+  FIND_LOGGED_OUT=$(call_tool "find_subreddits" '{"query":"python","candidates":["learnpython"]}')
   if [ "$LOGGED_OUT_ENDED" = "1" ]; then
     assert_logged_out_ended "find_subreddits without credentials" "$FIND_LOGGED_OUT"
   else
@@ -800,8 +801,8 @@ assert_contains "search_reddit: missing query → error" "$ERR_NO_QUERY" "_error
 ERR_NO_USER=$(call_tool "user_analysis" '{}')
 assert_contains "user_analysis: missing username → error" "$ERR_NO_USER" "_error\|Error\|error\|Required"
 
-ERR_NO_NEED=$(call_tool "find_subreddits" '{}')
-assert_contains "find_subreddits: missing need → error" "$ERR_NO_NEED" "_error\|Error\|error\|Required"
+ERR_NO_FIND_QUERY=$(call_tool "find_subreddits" '{}')
+assert_contains "find_subreddits: missing query → error" "$ERR_NO_FIND_QUERY" "_error\|Error\|error\|Required"
 
 ERR_NO_TERM=$(call_tool "reddit_explain" '{}')
 assert_contains "reddit_explain: missing term → error" "$ERR_NO_TERM" "_error\|Error\|error\|Required"

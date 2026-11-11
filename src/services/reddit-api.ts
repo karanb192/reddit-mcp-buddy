@@ -764,9 +764,9 @@ export class RedditAPI {
   /**
    * Reddit's own subreddit search (GET /subreddits/search). Credentials only.
    */
-  async searchSubreddits(query: string, limit: number = 10): Promise<FetchedListing<RedditSubreddit>> {
+  async searchSubreddits(query: string, limit: number = 10, includeNsfw: boolean = false): Promise<FetchedListing<RedditSubreddit>> {
     this.assertCredentialed();
-    const cacheKey = CacheManager.createKey('subreddit-search', query, limit);
+    const cacheKey = CacheManager.createKey('subreddit-search', query, limit, includeNsfw ? 'nsfw' : 'sfw');
     const cached = this.cache.get<FetchedListing<RedditSubreddit>>(cacheKey);
     if (cached) {
       return cached;
@@ -777,6 +777,10 @@ export class RedditAPI {
       limit: String(limit),
       raw_json: '1',
     });
+    // Reddit leaves NSFW subreddits out of this search unless asked (checked live, 2026-11-11).
+    if (includeNsfw) {
+      params.set('include_over_18', 'on');
+    }
     const listing = await this.get<RedditListing<RedditSubreddit>>(
       `/subreddits/search.json?${params.toString()}`
     );

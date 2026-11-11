@@ -159,17 +159,20 @@ Analyze a Reddit user's profile.
 ```
 
 ### `find_subreddits`
-Find subreddits for a need, and check subreddit names before using them.
+Find subreddits for a topic, and check subreddit names before using them.
 ```
-- Need: what the user wants, in plain words
+- Query: 2 to 4 keywords, not a sentence (Reddit's subreddit search matches words)
 - Candidates: up to 10 subreddit names the assistant thinks fit (optional)
 - Include NSFW: off by default
 - Limit: how many Reddit search suggestions to return (default 10, max 50)
+- Min subscribers: search suggestions below this are left out (default 1000);
+  candidates are never filtered by size
 - Returns: name, url, title, description, subscribers with an as-of time, NSFW flag, type,
   source (assistant or reddit_search), and whether it was confirmed to exist
 - Candidates Reddit does not return are listed in not_found; if the name check itself
   fails, they come back unchecked instead
-- Private subreddits are flagged, since browsing them fails
+- Subreddits that exist but cannot be read (private, quarantined, banned) are listed
+  in unavailable with the reason
 - Needs credentials; at most 2 Reddit requests per call
 ```
 
@@ -555,7 +558,7 @@ cd reddit-mcp-buddy
 
 **"Where do people discuss home espresso machines?"**
 ```
-→ find_subreddits with need="home espresso machines", candidates=["espresso", "Coffee"]
+→ find_subreddits with query="home espresso", candidates=["espresso", "Coffee"]
 ```
 
 **"Get the comments from this Reddit post"**

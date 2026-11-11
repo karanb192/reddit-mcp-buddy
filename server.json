@@ -63,7 +63,7 @@
     },
     {
       "name": "find_subreddits",
-      "description": "Find subreddits for a need and check candidate subreddit names in one call. Returns subscribers with an as-of time, NSFW flags, and names Reddit does not return. Needs Reddit API credentials."
+      "description": "Find subreddits for a topic and check candidate subreddit names in one call. Returns subscribers with an as-of time, NSFW flags, names Reddit does not return, and names that exist but cannot be read. Needs Reddit API credentials."
     },
     {
       "name": "reddit_explain",

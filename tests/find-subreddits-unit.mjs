@@ -71,26 +71,25 @@ const misleading = /does not exist|not found|private|quarantined|banned|nsfw|ina
 
 try {
   // Schema: names are cleaned, bounds hold, and only single subreddit names are accepted.
-  const parsed = parse({ need: '  mechanical keyboards  ', candidates: ['r/MechanicalKeyboards', '/r/keyboards', ' typing '] });
-  assert.equal(parsed.need, 'mechanical keyboards');
+  const parsed = parse({ query: '  mechanical keyboards  ', candidates: ['r/MechanicalKeyboards', '/r/keyboards', ' typing '] });
+  assert.equal(parsed.query, 'mechanical keyboards');
+  assert.equal(parsed.min_subscribers, 1000);
   assert.deepEqual(parsed.candidates, ['MechanicalKeyboards', 'keyboards', 'typing']);
   assert.equal(parsed.include_nsfw, false);
   assert.equal(parsed.limit, 10);
   for (const bad of [
     {},
-    { need: '' },
-    { need: '   ' },
-    { need: 'x'.repeat(513) },
-    { need: 'x', candidates: Array.from({ length: 11 }, (_, i) => `sub${i}`) },
-    { need: 'x', candidates: ['a+b'] },
-    { need: 'x', candidates: ['u_some-user'] },
-    { need: 'x', candidates: ['has space'] },
-    { need: 'x', candidates: ['../api/v1/me'] },
-    { need: 'x', candidates: ['a'] },
-    { need: 'x', candidates: ['x'.repeat(22)] },
-    { need: 'x', limit: 0 },
-    { need: 'x', limit: 51 },
-    { need: 'x', limit: 2.5 },
+    { query: '' },
+    { query: '   ' },
+    { query: 'x'.repeat(513) },
+    { query: 'x', candidates: Array.from({ length: 11 }, (_, i) => `sub${i}`) },
+    { query: 'x', candidates: ['x'.repeat(101)] },
+    { query: 'x', candidates: [5] },
+    { query: 'x', limit: 0 },
+    { query: 'x', limit: 51 },
+    { query: 'x', limit: 2.5 },
+    { query: 'x', min_subscribers: -1 },
+    { need: 'x' },
   ]) {
     assert.equal(findSubredditsSchema.safeParse(bad).success, false, `schema must refuse ${JSON.stringify(bad)}`);
   }
@@ -103,14 +102,15 @@ try {
   Date.now = () => Date.UTC(2026, 10, 20, 12, 0, 0);
   const fresh = client();
   const out = await fresh.tools.findSubreddits(parse({
-    need: 'mechanical keyboards & typing?',
+    query: 'mechanical keyboards & typing?',
     candidates: ['MechanicalKeyboards', 'typing', 'notarealsub999', 'mechanicalkeyboards'],
   }));
   assert.equal(requests.length, 2);
   for (const u of requests) assert.equal(u.origin, 'https://oauth.reddit.com');
   const searchReq = requests.find(u => u.pathname === '/subreddits/search.json');
   assert.equal(searchReq.searchParams.get('q'), 'mechanical keyboards & typing?');
-  assert.equal(searchReq.searchParams.get('limit'), '10');
+  assert.equal(searchReq.searchParams.get('limit'), '20', 'asks for twice the limit, since small and NSFW suggestions are dropped before the cut');
+  assert.equal(searchReq.searchParams.get('include_over_18'), null);
   const infoReq = requests.find(u => u.pathname === '/api/info.json');
   assert.equal(infoReq.searchParams.get('sr_name'), 'MechanicalKeyboards,typing,notarealsub999', 'duplicates are removed before the lookup');
 
@@ -130,32 +130,33 @@ try {
   assert.deepEqual(out.not_found, ['notarealsub999']);
   assert.equal(out.total_results, 4);
   assert.equal(out.nsfw_hidden, 0);
+  assert.equal(out.small_hidden, 0);
+  assert.deepEqual(out.unavailable, []);
   assert.ok(out.note.includes('not_found'));
   assert.equal(out.nsfw_hidden_candidates, undefined);
 
   // A repeat call is served from the cache with the original as-of time, and the cached
   // Reddit listings are not changed by shaping or filtering.
-  const searchKey = CacheManager.createKey('subreddit-search', 'mechanical keyboards & typing?', 10);
+  const searchKey = CacheManager.createKey('subreddit-search', 'mechanical keyboards & typing?', 20, 'sfw');
   const namesKey = CacheManager.createKey('subreddit-names', 'mechanicalkeyboards', 'notarealsub999', 'typing');
   const before = JSON.stringify([fresh.cache.get(searchKey), fresh.cache.get(namesKey)]);
   assert.notEqual(before, '[null,null]');
   Date.now = () => Date.UTC(2026, 10, 20, 12, 3, 0);
   requests = [];
   const again = await fresh.tools.findSubreddits(parse({
-    need: 'mechanical keyboards & typing?',
+    query: 'mechanical keyboards & typing?',
     candidates: ['notarealsub999', 'Typing', 'MechanicalKeyboards'],
-    include_nsfw: true,
   }));
-  assert.equal(requests.length, 0, 'same need and same names in another order and case hit the cache');
+  assert.equal(requests.length, 0, 'same query and same names in another order and case hit the cache');
   assert.equal(again.results[0].subscribers_as_of, '2026-11-20T12:00:00.000Z');
   assert.equal(JSON.stringify([fresh.cache.get(searchKey), fresh.cache.get(namesKey)]), before);
   Date.now = realNow;
 
   // No candidates: one request only.
   mockReddit({ search: listing([t5('python')]), info: listing([]) });
-  const solo = await client().tools.findSubreddits(parse({ need: 'python help', limit: 3 }));
+  const solo = await client().tools.findSubreddits(parse({ query: 'python help', limit: 3 }));
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].searchParams.get('limit'), '3');
+  assert.equal(requests[0].searchParams.get('limit'), '6');
   assert.deepEqual(solo.not_found, []);
   assert.equal(solo.note, undefined);
 
@@ -165,14 +166,17 @@ try {
     info: listing([t5('nsfwcandidate', { over18: true })]),
   });
   const nsfw = client();
-  const hidden = await nsfw.tools.findSubreddits(parse({ need: 'q', candidates: ['nsfwcandidate'] }));
+  const hidden = await nsfw.tools.findSubreddits(parse({ query: 'q', candidates: ['nsfwcandidate'] }));
   assert.deepEqual(hidden.results.map(r => r.name), ['sfwsub', 'unknownflag']);
   assert.equal(hidden.results[1].nsfw, null, 'a missing flag is reported as unknown, not as false');
   assert.equal(hidden.nsfw_hidden, 2);
   assert.deepEqual(hidden.nsfw_hidden_candidates, ['nsfwcandidate']);
   assert.deepEqual(hidden.not_found, [], 'an NSFW candidate exists, so it is not reported as not found');
-  const shown = await nsfw.tools.findSubreddits(parse({ need: 'q', candidates: ['nsfwcandidate'], include_nsfw: true }));
-  assert.equal(requests.length, 2, 'include_nsfw is applied locally and does not change the Reddit requests');
+  requests = [];
+  const shown = await nsfw.tools.findSubreddits(parse({ query: 'q', candidates: ['nsfwcandidate'], include_nsfw: true }));
+  assert.equal(requests.length, 1, 'the name check is cached; the search is asked again with NSFW included');
+  assert.equal(requests[0].pathname, '/subreddits/search.json');
+  assert.equal(requests[0].searchParams.get('include_over_18'), 'on');
   assert.deepEqual(shown.results.map(r => r.name), ['nsfwcandidate', 'sfwsub', 'nsfwsub', 'unknownflag']);
   assert.equal(shown.nsfw_hidden, 0);
 
@@ -191,61 +195,128 @@ try {
   };
   for (const [label, body] of Object.entries(oddAnswers)) {
     mockReddit({ search: listing([]), info: body });
-    const odd = await client().tools.findSubreddits(parse({ need: 'q', candidates: ['askreddit'] }));
+    const odd = await client().tools.findSubreddits(parse({ query: 'q', candidates: ['askreddit'] }));
     assert.deepEqual(odd.results, [], label);
     assert.deepEqual(odd.not_found, ['askreddit'], label);
   }
 
-  // Minimal t5 records (as a private or restricted subreddit might return) keep the name and null the rest.
+  // A record with missing optional fields keeps its name and nulls the rest.
   mockReddit({
     search: listing([]),
-    info: listing([{ kind: 't5', data: { display_name: 'secretclub', subreddit_type: 'private', subscribers: null, public_description: '   ' } }]),
+    info: listing([{ kind: 't5', data: { display_name: 'quietclub', subreddit_type: 'restricted', subscribers: null, over18: false, public_description: '   ' } }]),
   });
-  const minimal = await client().tools.findSubreddits(parse({ need: 'q', candidates: ['secretclub'] }));
+  const minimal = await client().tools.findSubreddits(parse({ query: 'q', candidates: ['quietclub'] }));
   assert.deepEqual(minimal.results[0], {
-    name: 'secretclub',
-    url: 'https://www.reddit.com/r/secretclub/',
+    name: 'quietclub',
+    url: 'https://www.reddit.com/r/quietclub/',
     title: null,
     description: null,
     subscribers: null,
     subscribers_as_of: minimal.results[0].subscribers_as_of,
-    type: 'private',
-    nsfw: null,
+    type: 'restricted',
+    nsfw: false,
     source: 'assistant',
     confirmed_exists: true,
   });
   assert.ok(!Number.isNaN(Date.parse(minimal.results[0].subscribers_as_of)));
-  assert.ok(minimal.note.includes('Private') && minimal.note.includes('secretclub'), 'a private subreddit is flagged before a browse fails');
-  assert.ok(minimal.note.includes('returned nothing'), 'an empty search says how to retry');
+  assert.ok(minimal.note.includes('2 to 4 different keywords'), 'an empty search says how to retry');
+
+  // Subreddits the token cannot read come back from Reddit with counts and flags nulled (shapes seen
+  // live on 2026-11-11). They go to unavailable with a reason and never into results or not_found.
+  const nulled = { subscribers: null, over18: null, quarantine: null };
+  mockReddit({
+    search: listing([t5('openclub'), t5('bannedinsearch', nulled)]),
+    info: listing([
+      t5('CenturyClub', { ...nulled, subreddit_type: 'private' }),
+      t5('fatpeoplehate', nulled),
+      t5('TheRedPill', { ...nulled, quarantine_message: 'Are you sure?' }),
+      t5('flaggedquarantine', { quarantine: true }),
+      t5('learnpython'),
+    ]),
+  });
+  const blocked = await client().tools.findSubreddits(parse({
+    query: 'q', candidates: ['centuryclub', 'fatpeoplehate', 'theredpill', 'flaggedquarantine', 'learnpython'],
+  }));
+  assert.deepEqual(blocked.unavailable, [
+    { name: 'CenturyClub', reason: 'private' },
+    { name: 'fatpeoplehate', reason: 'banned_or_restricted' },
+    { name: 'TheRedPill', reason: 'quarantined' },
+    { name: 'flaggedquarantine', reason: 'quarantined' },
+  ]);
+  assert.deepEqual(blocked.results.map(r => r.name), ['learnpython', 'openclub'], 'an unreadable search result is dropped');
+  assert.deepEqual(blocked.not_found, []);
+  assert.ok(blocked.note.includes('unavailable'));
+  assert.ok(!JSON.stringify(blocked).includes('About fatpeoplehate'), 'an unavailable subreddit\'s description is not passed on');
+
+  // Small suggestions are left out and counted; candidates are never filtered by size; the limit is applied after.
+  mockReddit({
+    search: listing([t5('big1', { subscribers: 5000 }), t5('tiny', { subscribers: 12 }), t5('big2', { subscribers: 1000 }), t5('big3', { subscribers: 90000 }), t5('nocount', { subscribers: undefined })]),
+    info: listing([t5('tinycandidate', { subscribers: 3 })]),
+  });
+  const sized = client();
+  const filtered = await sized.tools.findSubreddits(parse({ query: 'q', candidates: ['tinycandidate'], limit: 2 }));
+  assert.deepEqual(filtered.results.map(r => r.name), ['tinycandidate', 'big1', 'big2']);
+  assert.equal(filtered.small_hidden, 1);
+  const unfiltered = await sized.tools.findSubreddits(parse({ query: 'q', limit: 2, min_subscribers: 0 }));
+  assert.deepEqual(unfiltered.results.map(r => r.name), ['big1', 'tiny']);
+  assert.equal(unfiltered.small_hidden, 0);
+  mockReddit({ search: listing([t5('tiny', { subscribers: 12 })]), info: listing([]) });
+  const onlySmall = await client().tools.findSubreddits(parse({ query: 'q' }));
+  assert.deepEqual(onlySmall.results, []);
+  assert.ok(onlySmall.note.includes('lower min_subscribers'));
+
+  // Names that cannot be subreddits are reported as not found and never reach Reddit.
+  mockReddit({ search: listing([t5('python')]), info: listing([t5('learnpython')]) });
+  const badNames = await client().tools.findSubreddits(parse({
+    query: 'q', candidates: ['a+b', 'u_some-user', 'has space', '../api/v1/me', 'a', 'x'.repeat(22), 'learnpython'],
+  }));
+  assert.equal(requests.find(u => u.pathname === '/api/info.json').searchParams.get('sr_name'), 'learnpython');
+  assert.deepEqual(badNames.not_found, ['a+b', 'u_some-user', 'has space', '../api/v1/me', 'a', 'x'.repeat(22)]);
+  assert.deepEqual(badNames.results.map(r => r.name), ['learnpython', 'python']);
+  assert.ok(badNames.note.includes('2 to 21 letters'));
+  assert.ok(!badNames.note.includes('Reddit returned nothing for the names'), 'Reddit was not asked about them');
+  mockReddit({ search: listing([t5('python')]), info: listing([]) });
+  const onlyBad = await client().tools.findSubreddits(parse({ query: 'q', candidates: ['a+b'] }));
+  assert.equal(requests.length, 1, 'no name check when no candidate is a valid name');
+  assert.deepEqual(onlyBad.not_found, ['a+b']);
+
+  // A sentence-length query still runs, with a note that the suggestions may be off topic.
+  mockReddit({ search: listing([t5('python')]), info: listing([]) });
+  const sentence = await client().tools.findSubreddits(parse({ query: 'where can I learn to cook on a budget' }));
+  assert.equal(sentence.total_results, 1);
+  assert.ok(sentence.note.includes('2 to 4 keywords'));
+  mockReddit({ search: listing([]), info: listing([]) });
+  const emptySentence = await client().tools.findSubreddits(parse({ query: 'where can I learn to cook on a budget' }));
+  assert.ok(emptySentence.note.includes('reads like a sentence'));
 
   // A long description is cut, and a non-numeric count is not passed through.
   mockReddit({ search: listing([t5('longdesc', { public_description: 'd'.repeat(1000), subscribers: '12' })]), info: listing([]) });
-  const long = await client().tools.findSubreddits(parse({ need: 'q' }));
+  const long = await client().tools.findSubreddits(parse({ query: 'q' }));
   assert.equal(long.results[0].description.length, 300);
   assert.equal(long.results[0].subscribers, null);
 
   // Odd search answers are also tolerated.
   for (const body of [{}, null, listing([{ kind: 'more', data: { children: ['x'] } }])]) {
     mockReddit({ search: body, info: listing([]) });
-    const empty = await client().tools.findSubreddits(parse({ need: 'q' }));
+    const empty = await client().tools.findSubreddits(parse({ query: 'q' }));
     assert.deepEqual(empty.results, []);
-    assert.ok(empty.note.includes('fewer, simpler words'));
+    assert.ok(empty.note.includes('likely subreddit names as candidates'));
   }
 
   // A candidate the name lookup leaves out but the search returns is real, so it is not reported as not found.
   mockReddit({ search: listing([t5('Quarantinedish')]), info: listing([]) });
-  const viaSearch = await client().tools.findSubreddits(parse({ need: 'q', candidates: ['quarantinedish'] }));
+  const viaSearch = await client().tools.findSubreddits(parse({ query: 'q', candidates: ['quarantinedish'] }));
   assert.deepEqual(viaSearch.results.map(r => [r.name, r.source, r.confirmed_exists]), [['Quarantinedish', 'assistant', true]]);
   assert.deepEqual(viaSearch.not_found, []);
 
   // Partial failures: the other half still answers, and unchecked names are never presented as confirmed.
   mockReddit({ search: new Response('upstream', { status: 500 }), info: listing([t5('python')]) });
-  const searchDown = await client().tools.findSubreddits(parse({ need: 'q', candidates: ['python'] }));
+  const searchDown = await client().tools.findSubreddits(parse({ query: 'q', candidates: ['python'] }));
   assert.deepEqual(searchDown.results.map(r => [r.name, r.confirmed_exists]), [['python', true]]);
   assert.ok(searchDown.note.includes('subreddit search failed'));
 
   mockReddit({ search: listing([t5('python')]), info: new Response('upstream', { status: 500 }) });
-  const namesDown = await client().tools.findSubreddits(parse({ need: 'q', candidates: ['Python', 'maybereal'] }));
+  const namesDown = await client().tools.findSubreddits(parse({ query: 'q', candidates: ['Python', 'maybereal'] }));
   assert.deepEqual(namesDown.results.map(r => [r.name, r.source, r.confirmed_exists]), [
     ['python', 'assistant', true],
     ['maybereal', 'assistant', false],
@@ -256,18 +327,18 @@ try {
   assert.ok(namesDown.note.includes('name check failed'));
 
   mockReddit({ search: new Response('upstream', { status: 500 }), info: new Response('upstream', { status: 500 }) });
-  await assert.rejects(client().tools.findSubreddits(parse({ need: 'q', candidates: ['python'] })), /500/);
+  await assert.rejects(client().tools.findSubreddits(parse({ query: 'q', candidates: ['python'] })), /500/);
   mockReddit({ search: new Response('upstream', { status: 500 }), info: listing([]) });
-  await assert.rejects(client().tools.findSubreddits(parse({ need: 'q' })), /500/);
+  await assert.rejects(client().tools.findSubreddits(parse({ query: 'q' })), /500/);
 
   // Without credentials, before the cutoff: the credentials error, raised before any cache read or request.
   mockReddit({ search: listing([t5('python')]), info: listing([t5('python')]) });
   const loggedOut = client({ authenticated: false });
-  loggedOut.cache.set(CacheManager.createKey('subreddit-search', 'q', 10), { fetched_at: 0, listing: listing([t5('python')]) });
+  loggedOut.cache.set(CacheManager.createKey('subreddit-search', 'q', 20, 'sfw'), { fetched_at: 0, listing: listing([t5('python')]) });
   const isCredentialsError = e =>
     e instanceof CredentialsRequiredError && e.status === 403 && e.message === CREDENTIALS_REQUIRED_MESSAGE;
-  await assert.rejects(loggedOut.tools.findSubreddits(parse({ need: 'q' })), isCredentialsError);
-  await assert.rejects(loggedOut.tools.findSubreddits(parse({ need: 'q', candidates: ['python'] })), isCredentialsError);
+  await assert.rejects(loggedOut.tools.findSubreddits(parse({ query: 'q' })), isCredentialsError);
+  await assert.rejects(loggedOut.tools.findSubreddits(parse({ query: 'q', candidates: ['python'] })), isCredentialsError);
   await assert.rejects(loggedOut.api.searchSubreddits('q'), isCredentialsError);
   await assert.rejects(loggedOut.api.getSubredditsByName(['python']), isCredentialsError);
   assert.equal(requests.length, 0);
@@ -278,7 +349,7 @@ try {
   // Without credentials, after the cutoff: the shutdown error, the same one every other tool gives.
   const ended = client({ authenticated: false, endsAt: LOGGED_OUT_ACCESS_ENDS_AT });
   Date.now = () => LOGGED_OUT_ACCESS_ENDS_AT + 1;
-  await assert.rejects(ended.tools.findSubreddits(parse({ need: 'q', candidates: ['python'] })),
+  await assert.rejects(ended.tools.findSubreddits(parse({ query: 'q', candidates: ['python'] })),
     e => e.message === LOGGED_OUT_ENDED_MESSAGE && e.status === 403);
   assert.equal(requests.length, 0);
   Date.now = realNow;
@@ -286,7 +357,7 @@ try {
   // Credentials are unaffected by the cutoff.
   Date.now = () => LOGGED_OUT_ACCESS_ENDS_AT + 86400000;
   mockReddit({ search: listing([t5('python')]), info: listing([]) });
-  const afterCutoff = await client({ authenticated: true, endsAt: LOGGED_OUT_ACCESS_ENDS_AT }).tools.findSubreddits(parse({ need: 'q' }));
+  const afterCutoff = await client({ authenticated: true, endsAt: LOGGED_OUT_ACCESS_ENDS_AT }).tools.findSubreddits(parse({ query: 'q' }));
   assert.equal(afterCutoff.total_results, 1);
   Date.now = realNow;
 
@@ -309,16 +380,16 @@ try {
   const def = tools.find(t => t.name === 'find_subreddits');
   assert.ok(def, 'find_subreddits is listed');
   assert.equal(def.annotations.readOnlyHint, true);
-  assert.deepEqual(def.inputSchema.required, ['need']);
+  assert.deepEqual(def.inputSchema.required, ['query']);
   assert.equal(def.inputSchema.properties.candidates.maxItems, 10);
   assert.equal(def.inputSchema.additionalProperties, false);
   assert.ok(/before browse_subreddit or search_reddit/.test(def.description));
   assert.ok(!/apply/i.test(def.description));
-  const call = await mcp.handlers['tools/call']({ name: 'find_subreddits', arguments: { need: 'q', candidates: ['python'] } });
+  const call = await mcp.handlers['tools/call']({ name: 'find_subreddits', arguments: { query: 'q', candidates: ['python'] } });
   assert.equal(call.isError, true);
   const expected = Date.now() >= LOGGED_OUT_ACCESS_ENDS_AT ? LOGGED_OUT_ENDED_MESSAGE : CREDENTIALS_REQUIRED_MESSAGE;
   assert.equal(call.content[0].text, `Error: ${expected}`);
-  const invalid = await mcp.handlers['tools/call']({ name: 'find_subreddits', arguments: { need: 'q', candidates: ['a+b'] } });
+  const invalid = await mcp.handlers['tools/call']({ name: 'find_subreddits', arguments: { query: 'q', limit: 0 } });
   assert.equal(invalid.isError, true);
   assert.equal(requests.length, 0);
 
