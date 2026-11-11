@@ -8,12 +8,12 @@
  * - Authenticated: 100 requests/minute
  *
  * Usage:
- *   node scripts/test-rate-limit.js [mode] [requests]
+ *   node scripts/rate-limit-tester.cjs [mode] [requests]
  *
  * Examples:
- *   node scripts/test-rate-limit.js              # Test current auth mode
- *   node scripts/test-rate-limit.js app-only 70  # Test app-only mode with 70 requests
- *   node scripts/test-rate-limit.js auth 120     # Test authenticated mode with 120 requests
+ *   node scripts/rate-limit-tester.cjs              # Test current auth mode
+ *   node scripts/rate-limit-tester.cjs app-only 70  # Test app-only mode with 70 requests
+ *   node scripts/rate-limit-tester.cjs auth 120     # Test authenticated mode with 120 requests
  */
 
 const { spawn } = require('child_process');
@@ -149,23 +149,17 @@ const server = spawn('npm', ['start'], {
 let serverReady = false;
 let serverOutput = '';
 
-// Monitor server output
-server.stdout.on('data', (data) => {
-  const text = data.toString();
-  serverOutput += text;
-  if (!serverReady && text.includes('Reddit MCP Buddy Server running')) {
-    serverReady = true;
-  }
-});
-
-server.stderr.on('data', (data) => {
-  const text = data.toString();
-  serverOutput += text;
-  if (!serverReady && text.includes('Reddit MCP Buddy Server running')) {
+// The ready line can arrive on either stream and split across chunks, so match the whole output so far.
+function onServerOutput(data) {
+  serverOutput += data.toString();
+  if (!serverReady && serverOutput.includes('Reddit MCP Buddy Server running')) {
     serverReady = true;
     startTest();
   }
-});
+}
+
+server.stdout.on('data', onServerOutput);
+server.stderr.on('data', onServerOutput);
 
 // Test statistics
 const stats = {
