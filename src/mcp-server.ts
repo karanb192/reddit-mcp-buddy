@@ -40,7 +40,7 @@ import {
 
 // Server metadata
 export const SERVER_NAME = 'reddit-mcp-buddy';
-export const SERVER_VERSION = '1.2.1';
+export const SERVER_VERSION = '1.3.0';
 
 export const MAX_TOOL_INPUT_ELEMENTS = 1000;
 
