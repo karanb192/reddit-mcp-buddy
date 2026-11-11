@@ -204,7 +204,8 @@ NSFW posts and subreddits are left out by default. When you ask for them, the as
 
 - In `ask` and `always`, `get_post_details` and `user_analysis` are not filtered: you named the post or the user.
 - Any other value is treated as `never` and logged at startup, so a typo cannot open what you meant to lock.
-- The server goes by Reddit's own NSFW mark on each post, comment and subreddit. It does not inspect content, so something Reddit has marked as not NSFW is shown.
+- The server goes by Reddit's own NSFW mark on each post and subreddit, and on the comments in a user's history. It does not inspect content, so something Reddit has marked as not NSFW is shown.
+- Reddit puts no NSFW mark on the comments under a post, so the post's mark decides for them: `get_post_details` returns the comments of a post that is not marked NSFW as they are, on `never` too.
 - On `never`, anything Reddit has not marked either way is left out as well, and `browse_subreddit` leaves out the subreddit info of an NSFW subreddit.
 - Claude Desktop extension users: use the **NSFW content** field in the extension settings. It maps to the same variable.
 
