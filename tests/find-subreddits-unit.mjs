@@ -122,6 +122,7 @@ try {
   ]);
   assert.equal(out.results[0].subscribers, 1500001, 'a candidate uses the name lookup, not the search copy');
   assert.equal(out.results[0].subscribers_as_of, '2026-11-20T12:00:00.000Z');
+  assert.equal(out.results[0].url, 'https://www.reddit.com/r/MechanicalKeyboards/');
   assert.equal(out.results[0].title, 'MechanicalKeyboards title');
   assert.equal(out.results[0].description, 'About MechanicalKeyboards');
   assert.equal(out.results[0].nsfw, false);
@@ -203,6 +204,7 @@ try {
   const minimal = await client().tools.findSubreddits(parse({ need: 'q', candidates: ['secretclub'] }));
   assert.deepEqual(minimal.results[0], {
     name: 'secretclub',
+    url: 'https://www.reddit.com/r/secretclub/',
     title: null,
     description: null,
     subscribers: null,
@@ -213,6 +215,8 @@ try {
     confirmed_exists: true,
   });
   assert.ok(!Number.isNaN(Date.parse(minimal.results[0].subscribers_as_of)));
+  assert.ok(minimal.note.includes('Private') && minimal.note.includes('secretclub'), 'a private subreddit is flagged before a browse fails');
+  assert.ok(minimal.note.includes('returned nothing'), 'an empty search says how to retry');
 
   // A long description is cut, and a non-numeric count is not passed through.
   mockReddit({ search: listing([t5('longdesc', { public_description: 'd'.repeat(1000), subscribers: '12' })]), info: listing([]) });
@@ -225,6 +229,7 @@ try {
     mockReddit({ search: body, info: listing([]) });
     const empty = await client().tools.findSubreddits(parse({ need: 'q' }));
     assert.deepEqual(empty.results, []);
+    assert.ok(empty.note.includes('fewer, simpler words'));
   }
 
   // A candidate the name lookup leaves out but the search returns is real, so it is not reported as not found.

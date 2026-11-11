@@ -165,9 +165,11 @@ Find subreddits for a need, and check subreddit names before using them.
 - Candidates: up to 10 subreddit names the assistant thinks fit (optional)
 - Include NSFW: off by default
 - Limit: how many Reddit search suggestions to return (default 10, max 50)
-- Returns: name, title, description, subscribers with an as-of time, NSFW flag,
+- Returns: name, url, title, description, subscribers with an as-of time, NSFW flag, type,
   source (assistant or reddit_search), and whether it was confirmed to exist
-- Candidates Reddit does not return are listed in not_found
+- Candidates Reddit does not return are listed in not_found; if the name check itself
+  fails, they come back unchecked instead
+- Private subreddits are flagged, since browsing them fails
 - Needs credentials; at most 2 Reddit requests per call
 ```
 

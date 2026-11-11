@@ -88,7 +88,8 @@ export const findSubredditsSchema = z.object({
       .refine(s => PLAIN_SUBREDDIT_RE.test(s), 'Each candidate must be one subreddit name, 2-21 characters (letters, numbers, underscore), with or without r/')
   ).max(10).optional()
     .describe('Up to 10 subreddit names you think fit, without r/. Each is checked against Reddit; names Reddit does not return come back in not_found.'),
-  include_nsfw: z.boolean().optional().default(false),
+  include_nsfw: z.boolean().optional().default(false)
+    .describe('Default false: NSFW subreddits are left out and counted in nsfw_hidden. Set true ONLY IF the user asks for NSFW communities.'),
   limit: z.number().int().min(1).max(50).optional().default(10).describe('Default 10, range (1-50). Most Reddit search suggestions to return. Change ONLY IF user asks.'),
 });
 
@@ -96,6 +97,7 @@ type SubredditSource = 'assistant' | 'reddit_search';
 
 interface FoundSubreddit {
   name: string;
+  url: string | null;
   title: string | null;
   description: string | null;
   subscribers: number | null;
@@ -124,6 +126,7 @@ function shapeSubreddit(data: any, source: SubredditSource, fetchedAt: number): 
     : null;
   return {
     name: data.display_name,
+    url: `https://www.reddit.com/r/${encodeURIComponent(data.display_name)}/`,
     title: typeof data.title === 'string' && data.title ? data.title : null,
     description: description ? description.substring(0, 300) : null,
     subscribers: typeof data.subscribers === 'number' && Number.isFinite(data.subscribers) ? data.subscribers : null,
@@ -670,6 +673,7 @@ export class RedditTools {
           ? { ...fromSearch, source: 'assistant' }
           : {
               name,
+              url: null,
               title: null,
               description: null,
               subscribers: null,
@@ -687,6 +691,10 @@ export class RedditTools {
       notes.push('Reddit returned nothing for the names in not_found. Treat them as unavailable: they may not exist, or may be banned or hidden. Do not browse or search them.');
     }
 
+    if (searchOutcome.status === 'fulfilled' && searchResults.length === 0) {
+      notes.push("Reddit's subreddit search returned nothing for this need. It matches words, so try again with fewer, simpler words.");
+    }
+
     const combined = [
       ...candidateResults,
       ...searchResults.filter(r => !seen.has(r.name.toLowerCase())),
@@ -694,6 +702,11 @@ export class RedditTools {
     const shown = combined.filter(r => params.include_nsfw || r.nsfw !== true);
     const hidden = combined.filter(r => !params.include_nsfw && r.nsfw === true);
     const hiddenCandidates = hidden.filter(r => r.source === 'assistant').map(r => r.name);
+
+    const privateNames = shown.filter(r => r.type === 'private').map(r => r.name);
+    if (privateNames.length > 0) {
+      notes.push(`Private, so browsing or searching will fail unless the account is a member: ${privateNames.join(', ')}.`);
+    }
 
     const result: any = {
       results: shown,

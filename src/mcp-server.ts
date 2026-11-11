@@ -377,7 +377,7 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
     },
     {
       name: 'find_subreddits',
-      description: 'Find the right subreddits for a need and check subreddit names before you use them. Call this before browse_subreddit or search_reddit with any subreddit you are not sure exists. Give the user\'s need in words and up to 10 candidate names: candidates Reddit does not return come back in not_found, and Reddit\'s own subreddit search adds suggestions. Each result has subscribers with an as-of time, an nsfw flag, its source, and confirmed_exists. NSFW subreddits are left out unless include_nsfw is true. Needs Reddit API credentials.',
+      description: 'Find the right subreddits for a need and check subreddit names before you use them. Call this before browse_subreddit or search_reddit with any subreddit you are not sure exists. Give the user\'s need in words and up to 10 candidate names: when the name check succeeds, candidates Reddit did not return come back in not_found; when it fails, they come back with confirmed_exists false, meaning unchecked. Reddit\'s own subreddit search adds suggestions. Each result has a url, subscribers with an as-of time, an nsfw flag, its type (a private subreddit cannot be browsed), its source, and confirmed_exists. NSFW subreddits are left out unless include_nsfw is true. Needs Reddit API credentials.',
       inputSchema: zodSchemaToMCPInputSchema(findSubredditsSchema, 'find_subreddits'),
       annotations: { readOnlyHint: true }
     },
