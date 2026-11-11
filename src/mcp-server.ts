@@ -19,6 +19,7 @@ import { AuthManager } from './core/auth.js';
 import { CacheManager } from './core/cache.js';
 import { RateLimiter } from './core/rate-limiter.js';
 import { WriteGate } from './core/write-gate.js';
+import { NsfwMode, NSFW_ENV, parseNsfwMode } from './core/nsfw.js';
 import { RedditAPI, LOGGED_OUT_ENDED_MESSAGE } from './services/reddit-api.js';
 import {
   RedditTools,
@@ -162,7 +163,15 @@ export interface SharedServices {
   /** Present only when writeStatus.enabled */
   writeTools?: RedditWriteTools;
   actingUser?: string;
+  /** Absent means 'ask' */
+  nsfwMode?: NsfwMode;
 }
+
+const NSFW_INSTRUCTIONS: Record<NsfwMode, string> = {
+  ask: 'NSFW: left out of browse_subreddit, search_reddit and find_subreddits unless the call sets include_nsfw true. Set it only when the user asks for NSFW content.',
+  never: 'NSFW: this server never returns NSFW content. include_nsfw has no effect, NSFW posts cannot be opened, and NSFW items are left out of user_analysis. Tell the user if they ask for it; do not retry.',
+  always: 'NSFW: included by default on this server (its owner chose that). Pass include_nsfw false to leave it out.',
+};
 
 /** Parse boolean env var (supports various truthy formats: true, 1, yes, on) */
 function parseEnvBoolean(envValue: string | undefined): boolean {
@@ -236,6 +245,13 @@ export async function createSharedServices(): Promise<SharedServices> {
   console.error(`⏱️  Rate limit: ${rateLimit} requests/minute`);
   console.error(`💾 Cache: ${disableCache ? 'Disabled' : `TTL ${cacheTTL / 60000} minutes`}`);
 
+  const nsfw = parseNsfwMode(process.env[NSFW_ENV]);
+  if (nsfw.warning) {
+    console.error(`⚠️  ${nsfw.warning}`);
+  } else if (nsfw.mode !== 'ask') {
+    console.error(`🔞 NSFW content: ${nsfw.mode === 'never' ? 'never returned' : 'included by default'} (${NSFW_ENV}=${nsfw.mode})`);
+  }
+
   // Create cache manager with auth-based TTL
   const cacheManager = new CacheManager({
     defaultTTL: disableCache ? 0 : cacheTTL,
@@ -284,13 +300,14 @@ export async function createSharedServices(): Promise<SharedServices> {
 
   return {
     cacheManager,
-    tools: new RedditTools(redditAPI),
+    tools: new RedditTools(redditAPI, nsfw.mode),
     rateLimit,
     cacheTTL,
     writeGate,
     writeStatus,
     writeTools,
     actingUser: writeStatus.actingUser,
+    nsfwMode: nsfw.mode,
   };
 }
 
@@ -339,6 +356,8 @@ COMMON QUERIES:
 - "Analyze a Reddit user" → user_analysis with username
 - "Which subreddits cover X?" or a subreddit name you are unsure of → find_subreddits with query (2 to 4 keywords) and your candidate names, before browsing or searching
 
+${NSFW_INSTRUCTIONS[services.nsfwMode ?? 'ask']}
+
 Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minutes.${writeEnabled ? `
 
 POSTING (write tools enabled, acting as u/${services.actingUser}):
@@ -359,7 +378,7 @@ POSTING (write tools enabled, acting as u/${services.actingUser}):
     },
     {
       name: 'search_reddit',
-      description: 'Search for posts across Reddit or specific subreddits. Returns matching posts with content and metadata.',
+      description: 'Search for posts across Reddit or specific subreddits. Returns matching posts with content and metadata. NSFW posts are left out unless include_nsfw is true, and a search inside an NSFW subreddit returns nothing without it.',
       inputSchema: zodSchemaToMCPInputSchema(searchRedditSchema, 'search_reddit'),
       annotations: { readOnlyHint: true }
     },

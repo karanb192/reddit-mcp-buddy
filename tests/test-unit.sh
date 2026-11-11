@@ -1286,7 +1286,8 @@ CACHE_INTEGRITY_RESULT=$(node --input-type=module -e '
   const filtered = await t.searchReddit({ query: "q", sort: "relevance", time: "all", limit: 25, author: "alice" });
   const unfiltered = await t.searchReddit({ query: "q", sort: "relevance", time: "all", limit: 25 });
   const t1 = filtered.total_results === 1;
-  const t2 = unfiltered.total_results === 5;
+  // 4, not 5: the listing has one NSFW post, left out of search by default and counted
+  const t2 = unfiltered.total_results === 4 && unfiltered.nsfw_hidden === 1;
   // filter-after-limit shrinkage is disclosed rather than silent
   const t3 = typeof filtered.filter_note === "string" && /limit/.test(filtered.filter_note);
 
@@ -2446,6 +2447,7 @@ assert "OAuth consent CLI: loopback callback, state check, code exchange, scopes
 assert "Tool input: calls over 1000 array elements and object keys are refused before validation" "node tests/tool-input-unit.mjs"
 assert "Security: HTTP body limit counts bytes, upstream error text is capped" "node tests/security-unit.mjs"
 assert "find_subreddits: two requests, name check, NSFW filter, odd responses, cache, and the credentials error" "node tests/find-subreddits-unit.mjs"
+assert "NSFW setting: ask, never and always across browse, search, subreddit discovery, post details and user analysis" "node tests/nsfw-unit.mjs"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RESULTS
