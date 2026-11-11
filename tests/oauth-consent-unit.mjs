@@ -204,7 +204,8 @@ try {
   const tokenFile = join(tempDir, 'token.env');
   await writeTokenFile(tokenFile, refreshSecret);
   assert.equal(readFileSync(tokenFile, 'utf8'), `REDDIT_REFRESH_TOKEN=${refreshSecret}\n`);
-  assert.equal(statSync(tokenFile).mode & 0o777, 0o600);
+  // Windows has no owner-only mode bits; the 0600 guarantee is for macOS and Linux.
+  if (process.platform !== 'win32') assert.equal(statSync(tokenFile).mode & 0o777, 0o600);
   const existing = join(tempDir, 'existing.env');
   writeFileSync(existing, 'keep\n');
   await assert.rejects(writeTokenFile(existing, refreshSecret), /EEXIST/);

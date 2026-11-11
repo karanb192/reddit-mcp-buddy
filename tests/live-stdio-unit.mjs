@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { runLiveWrite } from './live-write.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'reddit-stdio-test-'));
@@ -18,7 +17,8 @@ try {
     REDDIT_USERNAME: 'sandbox_test_user', REDDIT_PASSWORD: 'offline-password',
     REDDIT_BUDDY_WRITE: 'true', REDDIT_BUDDY_HTTP: 'false',
     SANDBOX_FIXTURE_STATE: stateFile,
-    NODE_OPTIONS: '--import=' + fileURLToPath(new URL('./fixtures/live-write-api.mjs', import.meta.url)),
+    // A file URL, not a path: Node's --import rejects a Windows drive path such as D:\\...
+    NODE_OPTIONS: '--import=' + new URL('./fixtures/live-write-api.mjs', import.meta.url).href,
   });
   await import('./fixtures/live-write-api.mjs');
   const { createSharedServices } = await import('../dist/mcp-server.js');
