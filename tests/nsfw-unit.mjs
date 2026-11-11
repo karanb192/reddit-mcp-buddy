@@ -73,7 +73,9 @@ function mockReddit(routes = {}) {
     requests.push(u);
     const p = u.pathname;
     let answer;
-    if (/\/search\.json$/.test(p) && !p.startsWith('/subreddits/')) {
+    if (p === '/api/v1/access_token') {
+      answer = { access_token: 'test-token', token_type: 'bearer', expires_in: 3600, scope: '*' };
+    } else if (/\/search\.json$/.test(p) && !p.startsWith('/subreddits/')) {
       answer = routes.search ? routes.search(u)
         : listing(u.searchParams.get('include_over_18') === 'on' ? MIXED : MIXED.filter(c => !c.data.over_18));
     } else if (p === '/subreddits/search.json') {
@@ -310,7 +312,7 @@ try {
   assert.match(out.nsfwNote, /^1 NSFW item was left out/);
 
   // Through the server: the environment variable sets the mode, and the model is told which one.
-  const serverFor = async value => {
+  const serverFor = async (value, calls = []) => {
     if (value === undefined) delete process.env.REDDIT_BUDDY_NSFW; else process.env.REDDIT_BUDDY_NSFW = value;
     const logged = [];
     console.error = (...args) => logged.push(args.join(' '));
@@ -328,8 +330,10 @@ try {
     await mcp.connect(ct);
     const instructions = mcp.getInstructions() ?? '';
     const { tools } = await mcp.listTools();
+    const answers = [];
+    for (const call of calls) answers.push(await mcp.callTool(call));
     await mcp.close();
-    return { shared, logged: logged.join('\n'), instructions, tools };
+    return { shared, logged: logged.join('\n'), instructions, tools, answers };
   };
 
   let srv = await serverFor(undefined);
@@ -346,6 +350,28 @@ try {
   for (const name of ['get_post_details', 'user_analysis', 'reddit_explain']) {
     assert.equal(srv.tools.find(t => t.name === name).inputSchema.properties.include_nsfw, undefined, name);
   }
+
+  // With credentials, real tool calls through the server follow the variable.
+  process.env.REDDIT_CLIENT_ID = 'test-client-id';
+  process.env.REDDIT_CLIENT_SECRET = 'test-client-secret';
+  mockReddit();
+  srv = await serverFor('never', [
+    { name: 'browse_subreddit', arguments: { subreddit: 'sub', include_nsfw: true } },
+    { name: 'get_post_details', arguments: { post_id: 'p1', subreddit: 'sub' } },
+  ]);
+  const lockedBrowse = JSON.parse(srv.answers[0].content[0].text);
+  assert.deepEqual(lockedBrowse.posts.map(post => post.id), ['a', 'c']);
+  assert.equal(lockedBrowse.nsfw_hidden, 2);
+  assert.equal(srv.answers[1].isError, true);
+  assert.match(srv.answers[1].content[0].text, /^Error: This post is marked NSFW\. This server is set to never return NSFW content/);
+  mockReddit();
+  srv = await serverFor('always', [{ name: 'search_reddit', arguments: { query: 'q' } }]);
+  assert.deepEqual(JSON.parse(srv.answers[0].content[0].text).results.map(post => post.id), ['a', 'b', 'c', 'd']);
+  mockReddit();
+  srv = await serverFor(undefined, [{ name: 'search_reddit', arguments: { query: 'q' } }]);
+  assert.deepEqual(JSON.parse(srv.answers[0].content[0].text).results.map(post => post.id), ['a', 'c']);
+  delete process.env.REDDIT_CLIENT_ID;
+  delete process.env.REDDIT_CLIENT_SECRET;
 
   srv = await serverFor('never');
   assert.equal(srv.shared.nsfwMode, 'never');

@@ -29,7 +29,8 @@
         "REDDIT_USERNAME": "${user_config.reddit_username}",
         "REDDIT_PASSWORD": "${user_config.reddit_password}",
         "REDDIT_REFRESH_TOKEN": "${user_config.reddit_refresh_token}",
-        "REDDIT_BUDDY_WRITE": "${user_config.enable_write_tools}"
+        "REDDIT_BUDDY_WRITE": "${user_config.enable_write_tools}",
+        "REDDIT_BUDDY_NSFW": "${user_config.nsfw_content}"
       }
     }
   },
@@ -124,6 +125,13 @@
       "description": "Adds create_post, add_comment, and subreddit_rules over stdio. Requires client credentials plus a refresh token or username/password, with identity/read/submit/flair scopes. Off by default. Uses a confirmation prompt when supported; otherwise approval depends on the client before repeating an identical previewed payload.",
       "required": false,
       "default": false
+    },
+    "nsfw_content": {
+      "type": "string",
+      "title": "NSFW content",
+      "description": "ask (default): NSFW posts and subreddits are hidden unless you ask for them. never: always hidden, whatever the assistant sends. always: included by default. Any other value is treated as never.",
+      "required": false,
+      "default": "ask"
     }
   }
 }

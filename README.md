@@ -122,6 +122,7 @@ Browse posts from any subreddit with sorting options.
 - Sort by: hot, new, top, rising, controversial
 - Time range: hour, day, week, month, year, all (for top/controversial sort)
 - Include subreddit info: Optional flag for subreddit metadata (requires credentials)
+- Include NSFW: off by default; posts left out are counted in nsfw_hidden
 ```
 
 > **No credentials?** Until 2026-11-13, results come from Reddit's RSS feed (`data_source: "rss"`): `score`, `num_comments`, `upvote_ratio`, and `nsfw` come back `null`, and the `include_nsfw` filter can't be applied. Reddit ends RSS support on 2026-11-13 ([changelog](https://support.reddithelp.com/hc/en-us/articles/54353370049684-Changelog-October-8-2026)); from then on browsing needs credentials too ([Authentication](#authentication)).
@@ -132,6 +133,8 @@ Search across Reddit or specific subreddits.
 - Query: Your search terms
 - Filter by: subreddit, author, time, flair
 - Sort by: relevance, hot, top, new, comments
+- Include NSFW: off by default. Reddit leaves NSFW posts out before it answers, so a
+  search inside an NSFW subreddit returns nothing unless this is on
 ```
 
 ### `get_post_details`
@@ -163,7 +166,7 @@ Find subreddits for a topic, and check subreddit names before using them.
 ```
 - Query: 2 to 4 keywords, not a sentence (Reddit's subreddit search matches words)
 - Candidates: up to 10 subreddit names the assistant thinks fit (optional)
-- Include NSFW: off by default
+- Include NSFW: off by default; subreddits left out are counted in nsfw_hidden
 - Limit: how many Reddit search suggestions to return (default 10, max 50)
 - Min subscribers: search suggestions below this are left out (default 1000);
   candidates are never filtered by size
@@ -181,6 +184,28 @@ Get explanations of Reddit terms.
 ```
 - Terms: karma, cake day, AMA, ELI5, etc.
 ```
+
+### NSFW content
+NSFW posts and subreddits are left out by default. When you ask for them, the assistant can set `include_nsfw` on `browse_subreddit`, `search_reddit` or `find_subreddits` for that one call. To change the rule for the whole server, set `REDDIT_BUDDY_NSFW`:
+
+| Value | What it does |
+|-------|--------------|
+| `ask` (default) | Hidden unless a call sets `include_nsfw: true` |
+| `never` | Always hidden, whatever the assistant sends. `include_nsfw` has no effect, `get_post_details` refuses a post marked NSFW, and `user_analysis` leaves NSFW posts and comments out |
+| `always` | Included unless a call sets `include_nsfw: false` |
+
+```json
+"env": {
+  "REDDIT_CLIENT_ID": "your_client_id",
+  "REDDIT_CLIENT_SECRET": "your_client_secret",
+  "REDDIT_BUDDY_NSFW": "never"
+}
+```
+
+- In `ask` and `always`, `get_post_details` and `user_analysis` are not filtered: you named the post or the user.
+- Any other value is treated as `never` and logged at startup, so a typo cannot open what you meant to lock.
+- The server goes by Reddit's own NSFW mark on each post, comment and subreddit. It does not inspect content, so something Reddit has not marked is not caught.
+- Claude Desktop extension users: use the **NSFW content** field in the extension settings. It maps to the same variable.
 
 ### Write tools (opt-in)
 
@@ -645,6 +670,7 @@ $(npm prefix -g)/bin/reddit-mcp-buddy
 | `REDDIT_BUDDY_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the HTTP endpoint | none |
 | `REDDIT_BUDDY_ALLOWED_HOSTS` | Comma-separated `host:port` values accepted in the Host header (DNS-rebinding protection) | loopback values when bound to localhost |
 | `REDDIT_BUDDY_NO_CACHE` | Disable caching (always fetch fresh) | `false` |
+| `REDDIT_BUDDY_NSFW` | [NSFW content](#nsfw-content): `ask` (hidden unless a call asks), `never` (always hidden) or `always` (included by default) | `ask` |
 
 #### Posting (v1.2.0)
 | Variable | Description | Default |
