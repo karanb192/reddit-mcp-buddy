@@ -38,6 +38,27 @@ export function resolveIncludeNsfw(mode: NsfwMode, requested: boolean | undefine
   return requested ?? mode === 'always';
 }
 
+/**
+ * Whether "never" keeps out an item with this NSFW mark. An item Reddit did not mark either
+ * way is kept out too: a lock must not open because a flag is missing.
+ */
+export function lockedOut(mode: NsfwMode, mark: unknown): boolean {
+  return mode === 'never' && mark !== false;
+}
+
+/** Whether a tool that takes include_nsfw leaves out an item with this NSFW mark. */
+export function hidesNsfw(mode: NsfwMode, includeNsfw: boolean, mark: unknown): boolean {
+  return lockedOut(mode, mark) || (!includeNsfw && Boolean(mark));
+}
+
+/** The note for items a tool that takes include_nsfw left out. */
+export function nsfwHiddenNote(mode: NsfwMode, count: number, noun: string): string {
+  const things = count === 1 ? `${noun} was` : `${noun}s were`;
+  return mode === 'never'
+    ? `${count} ${things} left out as NSFW or not marked either way. ${nsfwHint(mode)}`
+    : `${count} NSFW ${things} left out. ${nsfwHint(mode)}`;
+}
+
 export const NSFW_NEVER_MESSAGE = `This server is set to never return NSFW content (${NSFW_ENV}).`;
 
 /** For the tools that take include_nsfw: what the model can do about hidden NSFW content under this mode. */

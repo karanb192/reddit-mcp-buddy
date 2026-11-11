@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { RedditAPI, RSS_UNKNOWN_SCORE, LoggedOutAccessEndedError, CredentialsRequiredError } from '../services/reddit-api.js';
 import { ContentProcessor } from '../services/content-processor.js';
 import { RedditListing, RedditPost } from '../types/reddit.types.js';
-import { NsfwMode, resolveIncludeNsfw, nsfwHint, NSFW_NEVER_MESSAGE, INCLUDE_NSFW_DESCRIPTION } from '../core/nsfw.js';
+import { NsfwMode, resolveIncludeNsfw, hidesNsfw, lockedOut, nsfwHint, nsfwHiddenNote, NSFW_NEVER_MESSAGE, INCLUDE_NSFW_DESCRIPTION } from '../core/nsfw.js';
 
 // Reddit identifier formats. These are security boundaries, not just
 // ergonomics: every value below is interpolated into a Reddit API path, and an
@@ -208,7 +208,7 @@ export class RedditTools {
     // key does not include include_nsfw).
     const includeNsfw = resolveIncludeNsfw(this.nsfwMode, params.include_nsfw);
     const readable = listing.data.children.filter(child => child.data);
-    const children = includeNsfw ? readable : readable.filter(child => !child.data.over_18);
+    const children = readable.filter(child => !hidesNsfw(this.nsfwMode, includeNsfw, child.data.over_18));
     const nsfwHidden = readable.length - children.length;
 
     // Extract just the essential fields from Reddit's verbose response
@@ -249,7 +249,7 @@ export class RedditTools {
 
     if (nsfwHidden > 0) {
       result.nsfw_hidden = nsfwHidden;
-      const hidden = `${nsfwHidden} NSFW ${nsfwHidden === 1 ? 'post was' : 'posts were'} left out. ${nsfwHint(this.nsfwMode)}`;
+      const hidden = nsfwHiddenNote(this.nsfwMode, nsfwHidden, 'post');
       result.note = result.note ? `${result.note} ${hidden}` : hidden;
     }
 
@@ -257,14 +257,21 @@ export class RedditTools {
     if (params.include_subreddit_info) {
       try {
         const subredditInfo = await this.api.getSubreddit(params.subreddit);
-        result.subreddit_info = {
-          name: subredditInfo.display_name,
-          subscribers: subredditInfo.subscribers,
-          description: subredditInfo.public_description || subredditInfo.description,
-          type: subredditInfo.subreddit_type,
-          created: new Date(subredditInfo.created_utc * 1000),
-          nsfw: subredditInfo.over18,
-        };
+        if (lockedOut(this.nsfwMode, subredditInfo.over18)) {
+          const why = `Subreddit info was left out: the subreddit is NSFW or not marked either way. ${NSFW_NEVER_MESSAGE}`;
+          result.note = result.note?.includes(NSFW_NEVER_MESSAGE)
+            ? `${result.note} Subreddit info was left out for the same reason.`
+            : result.note ? `${result.note} ${why}` : why;
+        } else {
+          result.subreddit_info = {
+            name: subredditInfo.display_name,
+            subscribers: subredditInfo.subscribers,
+            description: subredditInfo.public_description || subredditInfo.description,
+            type: subredditInfo.subreddit_type,
+            created: new Date(subredditInfo.created_utc * 1000),
+            nsfw: subredditInfo.over18,
+          };
+        }
       } catch (error) {
         // If subreddit info fails, continue without it
         console.error(`Failed to fetch subreddit info: ${error}`);
@@ -360,7 +367,7 @@ export class RedditTools {
     // caller of the same query.
     // Reddit leaves NSFW posts out when asked to; this also covers a response that carries them anyway.
     const fromReddit = results.data.children.filter(child => child.data);
-    let children = includeNsfw ? fromReddit : fromReddit.filter(child => !child.data.over_18);
+    let children = fromReddit.filter(child => !hidesNsfw(this.nsfwMode, includeNsfw, child.data.over_18));
     const nsfwHidden = fromReddit.length - children.length;
     const unfilteredCount = children.length;
 
@@ -406,7 +413,7 @@ export class RedditTools {
 
     if (nsfwHidden > 0) {
       result.nsfw_hidden = nsfwHidden;
-      result.note = `${nsfwHidden} NSFW ${nsfwHidden === 1 ? 'post was' : 'posts were'} left out. ${nsfwHint(this.nsfwMode)}`;
+      result.note = nsfwHiddenNote(this.nsfwMode, nsfwHidden, 'post');
     } else if (!includeNsfw && unfilteredCount === 0) {
       // Reddit drops NSFW posts before it answers, so an empty result cannot say how many there were.
       result.note = `No posts came back. NSFW posts are left out of search, and a search inside an NSFW subreddit returns nothing without them. ${nsfwHint(this.nsfwMode)}`;
@@ -449,8 +456,8 @@ export class RedditTools {
     }
     const post = postChild.data;
 
-    if (this.nsfwMode === 'never' && post.over_18) {
-      throw new Error(`This post is marked NSFW. ${NSFW_NEVER_MESSAGE}`);
+    if (lockedOut(this.nsfwMode, post.over_18)) {
+      throw new Error(`${post.over_18 ? 'This post is marked NSFW.' : 'Reddit did not say whether this post is NSFW.'} ${NSFW_NEVER_MESSAGE}`);
     }
 
     // Extract essential post fields
@@ -595,7 +602,7 @@ export class RedditTools {
       const withoutNsfw = <T extends { data: { children: Array<{ data: any }> } }>(listing: T | null): T | null => {
         if (!listing) return listing;
         // A NEW listing: the fetched one is the cached object.
-        const kept = listing.data.children.filter(child => child.data?.over_18 !== true);
+        const kept = listing.data.children.filter(child => !child.data || !lockedOut(this.nsfwMode, child.data.over_18));
         nsfwHidden += listing.data.children.length - kept.length;
         return { ...listing, data: { ...listing.data, children: kept } };
       };
@@ -660,7 +667,7 @@ export class RedditTools {
 
     if (nsfwHidden > 0) {
       summary.nsfwHidden = nsfwHidden;
-      summary.nsfwNote = `${nsfwHidden} NSFW ${nsfwHidden === 1 ? 'item was' : 'items were'} left out of this user's posts and comments. ${NSFW_NEVER_MESSAGE}`;
+      summary.nsfwNote = `${nsfwHidden} ${nsfwHidden === 1 ? 'item was' : 'items were'} left out of this user's posts and comments as NSFW or not marked either way. ${NSFW_NEVER_MESSAGE}`;
     }
 
     return summary;
@@ -781,7 +788,8 @@ export class RedditTools {
       notes.push(`Reddit's name check failed (${message(namesOutcome.reason)}). Candidates with confirmed_exists false were not checked; do not assume they exist.`);
     }
 
-    const hideNsfw = (r: FoundSubreddit) => !includeNsfw && r.nsfw === true;
+    // An unchecked candidate carries nothing from Reddit, so there is nothing to hide.
+    const hideNsfw = (r: FoundSubreddit) => r.confirmed_exists && hidesNsfw(this.nsfwMode, includeNsfw, r.nsfw);
     const shownCandidates = candidateResults.filter(r => !hideNsfw(r));
     const hiddenCandidates = candidateResults.filter(hideNsfw).map(r => r.name);
 
@@ -815,7 +823,7 @@ export class RedditTools {
     }
 
     if (this.nsfwMode === 'never' && (params.include_nsfw === true || nsfwHidden > 0)) {
-      notes.push(`NSFW subreddits are left out. ${nsfwHint(this.nsfwMode)}`);
+      notes.push(`Subreddits that are NSFW or not marked either way are left out. ${nsfwHint(this.nsfwMode)}`);
     }
 
     const shown = [...shownCandidates, ...shownSuggestions];

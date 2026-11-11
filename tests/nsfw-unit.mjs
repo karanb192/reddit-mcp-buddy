@@ -79,9 +79,13 @@ function mockReddit(routes = {}) {
       answer = routes.search ? routes.search(u)
         : listing(u.searchParams.get('include_over_18') === 'on' ? MIXED : MIXED.filter(c => !c.data.over_18));
     } else if (p === '/subreddits/search.json') {
-      answer = listing(u.searchParams.get('include_over_18') === 'on' ? [t5('sfwsub', false), t5('nsfwsub', true)] : [t5('sfwsub', false)]);
+      answer = routes.subSearch
+        ?? listing(u.searchParams.get('include_over_18') === 'on' ? [t5('sfwsub', false), t5('nsfwsub', true)] : [t5('sfwsub', false)]);
     } else if (p === '/api/info.json') {
-      answer = listing([t5('nsfwcandidate', true)]);
+      if (routes.info instanceof Response) return routes.info;
+      answer = routes.info ?? listing([t5('nsfwcandidate', true)]);
+    } else if (/^\/r\/[^/]+\/about\.json$/.test(p)) {
+      answer = routes.about ?? t5('sub', true);
     } else if (/\/comments\/[a-z0-9]+\.json$/.test(p)) {
       answer = [listing([routes.post ?? t3('p1', true)]), listing([])];
     } else if (/^\/user\/[^/]+\/about\.json$/.test(p)) {
@@ -253,7 +257,7 @@ try {
   assert.equal(requests.find(u => u.pathname === '/subreddits/search.json').searchParams.get('include_over_18'), null);
   assert.deepEqual(out.results.map(r => r.name), ['sfwsub']);
   assert.deepEqual(out.nsfw_hidden_candidates, ['nsfwcandidate']);
-  assert.match(out.note, /NSFW subreddits are left out\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\. include_nsfw has no effect\.$/);
+  assert.match(out.note, /Subreddits that are NSFW or not marked either way are left out\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\. include_nsfw has no effect\.$/);
   mockReddit();
   out = await client('never').tools.findSubreddits(find({}));
   assert.equal(out.note, undefined, 'no notice when nothing was asked for and nothing was hidden');
@@ -266,6 +270,65 @@ try {
   out = await client().tools.findSubreddits(find({ candidates: ['nsfwcandidate'] }));
   assert.deepEqual(out.results.map(r => r.name), ['sfwsub']);
   assert.equal(out.note, undefined);
+
+  // On a server set to never, a missing NSFW mark counts as NSFW: the lock does not open because a flag is absent.
+  // Elsewhere an unmarked item is shown, as before.
+  const UNMARKED = [t3('a', false), t3('u', undefined), t3('n', null), t3('b', true)];
+  mockReddit({ browse: UNMARKED });
+  out = await client('never').tools.browseSubreddit(browse({ include_nsfw: true }));
+  assert.deepEqual(ids(out), ['a']);
+  assert.equal(out.nsfw_hidden, 3);
+  assert.match(out.note, /^3 posts were left out as NSFW or not marked either way\. This server is set to never/);
+  mockReddit({ browse: UNMARKED });
+  assert.deepEqual(ids(await client().tools.browseSubreddit(browse({}))), ['a', 'u', 'n']);
+  mockReddit({ browse: UNMARKED });
+  assert.deepEqual(ids(await client('always').tools.browseSubreddit(browse({}))), ['a', 'u', 'n', 'b']);
+  // A feed with no marks at all, which is what the logged-out RSS fallback gives.
+  mockReddit({ browse: [t3('r1', undefined), t3('r2', undefined)] });
+  out = await client('never').tools.browseSubreddit(browse({}));
+  assert.deepEqual(out.posts, []);
+  assert.equal(out.nsfw_hidden, 2);
+
+  mockReddit({ search: () => listing(UNMARKED) });
+  out = await client('never').tools.searchReddit(search({}));
+  assert.deepEqual(ids(out), ['a']);
+  assert.equal(out.nsfw_hidden, 3);
+  assert.match(out.note, /^3 posts were left out as NSFW or not marked either way\./);
+  mockReddit({ search: () => listing(UNMARKED) });
+  assert.deepEqual(ids(await client().tools.searchReddit(search({}))), ['a', 'u', 'n']);
+
+  mockReddit({ subSearch: listing([t5('sfwsub', false), t5('unmarkedsub', undefined)]), info: listing([t5('unmarkedcandidate', undefined)]) });
+  out = await client('never').tools.findSubreddits(find({ candidates: ['unmarkedcandidate'] }));
+  assert.deepEqual(out.results.map(r => r.name), ['sfwsub']);
+  assert.equal(out.nsfw_hidden, 2);
+  assert.deepEqual(out.nsfw_hidden_candidates, ['unmarkedcandidate']);
+  mockReddit({ subSearch: listing([t5('sfwsub', false), t5('unmarkedsub', undefined)]), info: listing([t5('unmarkedcandidate', undefined)]) });
+  out = await client().tools.findSubreddits(find({ candidates: ['unmarkedcandidate'] }));
+  assert.deepEqual(out.results.map(r => r.name), ['unmarkedcandidate', 'sfwsub', 'unmarkedsub']);
+  // A candidate the name check could not reach carries nothing from Reddit, so it is still listed as unchecked.
+  mockReddit({ subSearch: listing([t5('sfwsub', false)]), info: new Response('', { status: 500 }) });
+  out = await client('never').tools.findSubreddits(find({ candidates: ['maybe'] }));
+  assert.deepEqual(out.results.map(r => [r.name, r.confirmed_exists]), [['maybe', false], ['sfwsub', true]]);
+  assert.equal(out.nsfw_hidden, 0);
+
+  // Subreddit info for an NSFW or unmarked subreddit is left out on never, with the reason; otherwise unchanged.
+  for (const mark of [true, undefined]) {
+    mockReddit({ browse: [t3('a', false)], about: t5('sub', mark) });
+    out = await client('never').tools.browseSubreddit(browse({ include_subreddit_info: true }));
+    assert.equal(out.subreddit_info, undefined, String(mark));
+    assert.match(out.note, /^Subreddit info was left out: the subreddit is NSFW or not marked either way\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\.$/);
+  }
+  mockReddit({ browse: [t3('a', false), t3('b', true)], about: t5('sub', true) });
+  out = await client('never').tools.browseSubreddit(browse({ include_subreddit_info: true }));
+  assert.equal(out.subreddit_info, undefined);
+  assert.equal(out.note, '1 post was left out as NSFW or not marked either way. This server is set to never return NSFW content (REDDIT_BUDDY_NSFW). include_nsfw has no effect. Subreddit info was left out for the same reason.');
+  mockReddit({ browse: [t3('a', false)], about: t5('sub', false) });
+  out = await client('never').tools.browseSubreddit(browse({ include_subreddit_info: true }));
+  assert.equal(out.subreddit_info.name, 'sub');
+  assert.equal(out.note, undefined);
+  mockReddit({ browse: [t3('a', false)], about: t5('sub', true) });
+  out = await client().tools.browseSubreddit(browse({ include_subreddit_info: true }));
+  assert.equal(out.subreddit_info.nsfw, true, 'by default the caller still gets the info for the subreddit it named');
 
   // get_post_details: a named NSFW post opens, except on a server set to never.
   const details = input => getPostDetailsSchema.parse({ post_id: 'p1', subreddit: 'sub', ...input });
@@ -281,6 +344,11 @@ try {
   mockReddit({ post: t3('p2', false) });
   out = await client('never').tools.getPostDetails(details({ post_id: 'p2' }));
   assert.equal(out.post.id, 'p2');
+  mockReddit({ post: t3('p3', undefined) });
+  await assert.rejects(client('never').tools.getPostDetails(details({ post_id: 'p3' })),
+    /^Error: Reddit did not say whether this post is NSFW\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\.$/);
+  mockReddit({ post: t3('p3', undefined) });
+  assert.equal((await client().tools.getPostDetails(details({ post_id: 'p3' }))).post.id, 'p3');
 
   // user_analysis: untouched by default; on a server set to never, NSFW items are dropped and counted.
   const analysis = userAnalysisSchema.parse({ username: 'someone', time_range: 'all' });
@@ -300,7 +368,7 @@ try {
     assert.ok(!lockedDump.includes(gone), `${gone} must not appear on a server set to never`);
   }
   assert.equal(out.nsfwHidden, 3);
-  assert.match(out.nsfwNote, /^3 NSFW items were left out of this user's posts and comments\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\.$/);
+  assert.match(out.nsfwNote, /^3 items were left out of this user's posts and comments as NSFW or not marked either way\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\.$/);
   const cachedPosts = c.cache.get(CacheManager.createKey('user-posts', 'someone', 'submitted', 'new', 'all', 10));
   assert.equal(cachedPosts.data.children.length, 2, 'the cached listing keeps every post');
 
@@ -309,7 +377,15 @@ try {
   out = await client('never').tools.userAnalysis(userAnalysisSchema.parse({ username: 'someone', time_range: 'all', posts_limit: 0 }));
   assert.deepEqual(out.recentComments ?? [], []);
   assert.equal(out.nsfwHidden, 1);
-  assert.match(out.nsfwNote, /^1 NSFW item was left out/);
+  assert.match(out.nsfwNote, /^1 item was left out/);
+
+  // Unmarked items are dropped too; a removed comment (no data) is not counted as hidden.
+  mockReddit({ submitted: [t3('u1', false), t3('u3', undefined)], comments: [t1('c2', false), { kind: 't1', data: null }, t1('c4', undefined)] });
+  out = await client('never').tools.userAnalysis(analysis);
+  const unmarkedDump = JSON.stringify(out);
+  assert.ok(unmarkedDump.includes('title u1') && unmarkedDump.includes('comment c2'));
+  assert.ok(!unmarkedDump.includes('title u3') && !unmarkedDump.includes('comment c4'));
+  assert.equal(out.nsfwHidden, 2);
 
   // Through the server: the environment variable sets the mode, and the model is told which one.
   const serverFor = async (value, calls = []) => {
