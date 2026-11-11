@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { RedditAPI, RSS_UNKNOWN_SCORE, LoggedOutAccessEndedError, CredentialsRequiredError } from '../services/reddit-api.js';
 import { ContentProcessor } from '../services/content-processor.js';
 import { RedditListing, RedditPost } from '../types/reddit.types.js';
+import { NsfwMode, resolveIncludeNsfw, hidesNsfw, lockedOut, nsfwHint, nsfwHiddenNote, NSFW_NEVER_MESSAGE, INCLUDE_NSFW_DESCRIPTION } from '../core/nsfw.js';
 
 // Reddit identifier formats. These are security boundaries, not just
 // ergonomics: every value below is interpolated into a Reddit API path, and an
@@ -31,7 +32,7 @@ export const browseSubredditSchema = z.object({
   sort: z.enum(['hot', 'new', 'top', 'rising', 'controversial']).optional().default('hot'),
   time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional(),
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Change ONLY IF user specifies.'),
-  include_nsfw: z.boolean().optional().default(false),
+  include_nsfw: z.boolean().optional().describe(INCLUDE_NSFW_DESCRIPTION),
   include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description. Requires Reddit credentials; omitted from RSS fallback results'),
 });
 
@@ -43,6 +44,7 @@ export const searchRedditSchema = z.object({
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Override ONLY IF user requests.'),
   author: z.string().optional(),
   flair: z.string().optional(),
+  include_nsfw: z.boolean().optional().describe(INCLUDE_NSFW_DESCRIPTION),
 });
 
 export const getPostDetailsSchema = z.object({
@@ -87,8 +89,8 @@ export const findSubredditsSchema = z.object({
     z.string().max(100).transform(s => s.trim().replace(/^\/?r\//i, ''))
   ).max(10).optional()
     .describe('Up to 10 subreddit names you think fit, without r/. Each is checked against Reddit; names Reddit does not return come back in not_found.'),
-  include_nsfw: z.boolean().optional().default(false)
-    .describe('Default false: NSFW subreddits are left out and counted in nsfw_hidden. Set true ONLY IF the user asks for NSFW communities.'),
+  include_nsfw: z.boolean().optional()
+    .describe(`NSFW subreddits left out are counted in nsfw_hidden. ${INCLUDE_NSFW_DESCRIPTION}`),
   limit: z.number().int().min(1).max(50).optional().default(10).describe('Default 10, range (1-50). Most Reddit search suggestions to return. Change ONLY IF user asks.'),
   min_subscribers: z.number().int().min(0).optional().default(1000)
     .describe('Default 1000. Search suggestions with fewer subscribers are left out and counted in small_hidden; your candidates are never filtered by size. Lower it ONLY IF the user wants niche or new communities.'),
@@ -187,7 +189,7 @@ function shapeRssPosts(posts: any[]): { posts: any[]; note: string } {
  * Tool implementations
  */
 export class RedditTools {
-  constructor(private api: RedditAPI) {}
+  constructor(private api: RedditAPI, private nsfwMode: NsfwMode = 'ask') {}
 
   async browseSubreddit(params: z.infer<typeof browseSubredditSchema>) {
     const listing = await this.api.browseSubreddit(
@@ -204,9 +206,10 @@ export class RedditTools {
     // Filter into a NEW array: `listing` is the cached object by reference, so
     // reassigning its children would shrink the shared cache entry (the cache
     // key does not include include_nsfw).
-    const children = listing.data.children.filter(
-      child => child.data && (params.include_nsfw || !child.data.over_18)
-    );
+    const includeNsfw = resolveIncludeNsfw(this.nsfwMode, params.include_nsfw);
+    const readable = listing.data.children.filter(child => child.data);
+    const children = readable.filter(child => !hidesNsfw(this.nsfwMode, includeNsfw, child.data.over_18));
+    const nsfwHidden = readable.length - children.length;
 
     // Extract just the essential fields from Reddit's verbose response
     const posts = children.map(child => ({
@@ -244,18 +247,31 @@ export class RedditTools {
       result.note = shaped.note;
     }
 
+    if (nsfwHidden > 0) {
+      result.nsfw_hidden = nsfwHidden;
+      const hidden = nsfwHiddenNote(this.nsfwMode, nsfwHidden, 'post');
+      result.note = result.note ? `${result.note} ${hidden}` : hidden;
+    }
+
     // Optionally fetch subreddit info
     if (params.include_subreddit_info) {
       try {
         const subredditInfo = await this.api.getSubreddit(params.subreddit);
-        result.subreddit_info = {
-          name: subredditInfo.display_name,
-          subscribers: subredditInfo.subscribers,
-          description: subredditInfo.public_description || subredditInfo.description,
-          type: subredditInfo.subreddit_type,
-          created: new Date(subredditInfo.created_utc * 1000),
-          nsfw: subredditInfo.over18,
-        };
+        if (lockedOut(this.nsfwMode, subredditInfo.over18)) {
+          const why = `Subreddit info was left out: the subreddit is NSFW or not marked either way. ${NSFW_NEVER_MESSAGE}`;
+          result.note = result.note?.includes(NSFW_NEVER_MESSAGE)
+            ? `${result.note} Subreddit info was left out for the same reason.`
+            : result.note ? `${result.note} ${why}` : why;
+        } else {
+          result.subreddit_info = {
+            name: subredditInfo.display_name,
+            subscribers: subredditInfo.subscribers,
+            description: subredditInfo.public_description || subredditInfo.description,
+            type: subredditInfo.subreddit_type,
+            created: new Date(subredditInfo.created_utc * 1000),
+            nsfw: subredditInfo.over18,
+          };
+        }
       } catch (error) {
         // If subreddit info fails, continue without it
         console.error(`Failed to fetch subreddit info: ${error}`);
@@ -266,6 +282,8 @@ export class RedditTools {
   }
 
   async searchReddit(params: z.infer<typeof searchRedditSchema>) {
+    const includeNsfw = resolveIncludeNsfw(this.nsfwMode, params.include_nsfw);
+
     // Handle multiple subreddits
     let results: RedditListing<RedditPost>;
     
@@ -277,6 +295,7 @@ export class RedditTools {
           sort: params.sort,
           time: params.time,
           limit: params.limit,
+          includeNsfw,
         });
       } else {
         // Multiple subreddits - parallel search with failure tolerance
@@ -286,6 +305,7 @@ export class RedditTools {
             sort: params.sort,
             time: params.time,
             limit: Math.ceil(params.limit! / params.subreddits!.length),
+            includeNsfw,
           })
         );
 
@@ -337,6 +357,7 @@ export class RedditTools {
         sort: params.sort,
         time: params.time,
         limit: params.limit,
+        includeNsfw,
       });
     }
 
@@ -344,7 +365,10 @@ export class RedditTools {
     // object by reference and the cache key excludes author/flair, so
     // reassigning its children would serve the filtered subset to every later
     // caller of the same query.
-    let children = results.data.children;
+    // Reddit leaves NSFW posts out when asked to; this also covers a response that carries them anyway.
+    const fromReddit = results.data.children.filter(child => child.data);
+    let children = fromReddit.filter(child => !hidesNsfw(this.nsfwMode, includeNsfw, child.data.over_18));
+    const nsfwHidden = fromReddit.length - children.length;
     const unfilteredCount = children.length;
 
     // Filter by author if specified
@@ -387,6 +411,14 @@ export class RedditTools {
       total_results: posts.length
     };
 
+    if (nsfwHidden > 0) {
+      result.nsfw_hidden = nsfwHidden;
+      result.note = nsfwHiddenNote(this.nsfwMode, nsfwHidden, 'post');
+    } else if (!includeNsfw && unfilteredCount === 0) {
+      // Reddit drops NSFW posts before it answers, so an empty result cannot say how many there were.
+      result.note = `No posts came back. NSFW posts are left out of search, and a search inside an NSFW subreddit returns nothing without them. ${nsfwHint(this.nsfwMode)}`;
+    }
+
     // Author/flair are applied locally, AFTER Reddit truncated the response to
     // `limit`. Say so, otherwise a short result list reads as "few matches
     // exist" rather than "few matches were in the first page".
@@ -423,6 +455,11 @@ export class RedditTools {
       throw new Error('Reddit returned no post for that id - it may be removed, quarantined, or withheld in your region');
     }
     const post = postChild.data;
+
+    // Comments on a post page carry no NSFW mark of their own (checked live, 2026-11-11): the post's mark covers them.
+    if (lockedOut(this.nsfwMode, post.over_18)) {
+      throw new Error(`${post.over_18 ? 'This post is marked NSFW.' : 'Reddit did not say whether this post is NSFW.'} ${NSFW_NEVER_MESSAGE}`);
+    }
 
     // Extract essential post fields
     const cleanPost = {
@@ -560,6 +597,20 @@ export class RedditTools {
       }
     }
 
+    // "never" is the owner's lock, so it also covers a named user's history.
+    let nsfwHidden = 0;
+    if (this.nsfwMode === 'never') {
+      const withoutNsfw = <T extends { data: { children: Array<{ data: any }> } }>(listing: T | null): T | null => {
+        if (!listing) return listing;
+        // A NEW listing: the fetched one is the cached object.
+        const kept = listing.data.children.filter(child => !child.data || !lockedOut(this.nsfwMode, child.data.over_18));
+        nsfwHidden += listing.data.children.length - kept.length;
+        return { ...listing, data: { ...listing.data, children: kept } };
+      };
+      posts = withoutNsfw(posts);
+      comments = withoutNsfw(comments);
+    }
+
     // Process summary
     let summary: any;
     if (posts) {
@@ -615,6 +666,11 @@ export class RedditTools {
       summary.timeRangeNote = `No posts found in the last ${timeRangeLabel}, showing all recent posts instead`;
     }
 
+    if (nsfwHidden > 0) {
+      summary.nsfwHidden = nsfwHidden;
+      summary.nsfwNote = `${nsfwHidden} ${nsfwHidden === 1 ? 'item was' : 'items were'} left out of this user's posts and comments as NSFW or not marked either way. ${NSFW_NEVER_MESSAGE}`;
+    }
+
     return summary;
   }
 
@@ -622,6 +678,7 @@ export class RedditTools {
 
 
   async findSubreddits(params: z.infer<typeof findSubredditsSchema>) {
+    const includeNsfw = resolveIncludeNsfw(this.nsfwMode, params.include_nsfw);
     const candidates: string[] = [];
     const seen = new Set<string>();
     const invalidNames: string[] = [];
@@ -634,7 +691,7 @@ export class RedditTools {
     // Ask for more than the limit, since small and NSFW suggestions are dropped before the cut.
     const searchSize = Math.min(100, params.limit * 3);
     const [searchOutcome, namesOutcome] = await Promise.allSettled([
-      this.api.searchSubreddits(params.query, searchSize, params.include_nsfw),
+      this.api.searchSubreddits(params.query, searchSize, includeNsfw),
       candidates.length > 0 ? this.api.getSubredditsByName(candidates) : Promise.resolve(null),
     ]);
 
@@ -732,7 +789,8 @@ export class RedditTools {
       notes.push(`Reddit's name check failed (${message(namesOutcome.reason)}). Candidates with confirmed_exists false were not checked; do not assume they exist.`);
     }
 
-    const hideNsfw = (r: FoundSubreddit) => !params.include_nsfw && r.nsfw === true;
+    // An unchecked candidate carries nothing from Reddit, so there is nothing to hide.
+    const hideNsfw = (r: FoundSubreddit) => r.confirmed_exists && hidesNsfw(this.nsfwMode, includeNsfw, r.nsfw);
     const shownCandidates = candidateResults.filter(r => !hideNsfw(r));
     const hiddenCandidates = candidateResults.filter(hideNsfw).map(r => r.name);
 
@@ -763,6 +821,10 @@ export class RedditTools {
       }
     } else if (isSentence) {
       notes.push("This query reads like a sentence. Reddit's subreddit search matches words, so the suggestions may be off topic: retry with 2 to 4 keywords if they do not fit.");
+    }
+
+    if (this.nsfwMode === 'never' && (params.include_nsfw === true || nsfwHidden > 0)) {
+      notes.push(`Subreddits that are NSFW or not marked either way are left out. ${nsfwHint(this.nsfwMode)}`);
     }
 
     const shown = [...shownCandidates, ...shownSuggestions];

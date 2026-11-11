@@ -632,6 +632,7 @@ export class RedditAPI {
       limit?: number;
       after?: string;
       restrictSr?: boolean;
+      includeNsfw?: boolean;
     } = {}
   ): Promise<RedditListing<RedditPost>> {
     this.assertLoggedOutAccessOpen();
@@ -641,10 +642,11 @@ export class RedditAPI {
       time = 'all', 
       limit = 10,
       after,
-      restrictSr = !!subreddit
+      restrictSr = !!subreddit,
+      includeNsfw = false
     } = options;
 
-    const cacheKey = CacheManager.createKey('search', query, subreddit, sort, time, limit, after);
+    const cacheKey = CacheManager.createKey('search', query, subreddit, sort, time, limit, after, includeNsfw ? 'nsfw' : 'sfw');
     
     const cached = this.cache.get<RedditListing<RedditPost>>(cacheKey);
     if (cached) {
@@ -659,6 +661,9 @@ export class RedditAPI {
       limit: String(limit),
       restrict_sr: String(restrictSr),
       raw_json: '1',
+      // An app-only token gets no NSFW posts unless this is on (checked live, 2026-11-11). It is sent
+      // either way so an account's own search preference cannot change the answer.
+      include_over_18: includeNsfw ? 'on' : 'off',
     });
 
     if (after) {

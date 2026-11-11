@@ -75,7 +75,7 @@ try {
   assert.equal(parsed.query, 'mechanical keyboards');
   assert.equal(parsed.min_subscribers, 1000);
   assert.deepEqual(parsed.candidates, ['MechanicalKeyboards', 'keyboards', 'typing']);
-  assert.equal(parsed.include_nsfw, false);
+  assert.equal(parsed.include_nsfw, undefined, 'unset follows the server setting');
   assert.equal(parsed.limit, 10);
   for (const bad of [
     {},
