@@ -175,12 +175,9 @@ docs: update authentication setup instructions
 
 ## 🐛 Debugging
 
-### Enable Debug Logging
+### Server logs
 
-```bash
-# Set debug environment variable
-DEBUG=reddit-mcp-buddy:* npm run dev
-```
+The server writes its startup state and errors to stderr. In stdio mode stdout carries only MCP messages.
 
 ### Common Issues
 
@@ -189,7 +186,7 @@ DEBUG=reddit-mcp-buddy:* npm run dev
    - Disable cache: `export REDDIT_BUDDY_NO_CACHE=true`
 
 2. **Authentication failures**
-   - Verify Reddit app type is "script"
+   - Check the app type matches the credentials: a "script" app for username and password, a "web app" for a refresh token
    - Check credentials are correctly set
    - Ensure username/password are for the same Reddit account
 
@@ -201,20 +198,22 @@ DEBUG=reddit-mcp-buddy:* npm run dev
 
 **Note**: Only maintainers can publish new versions.
 
-1. Update version in:
-   - `package.json`
-   - `server.json`
+1. Update the version in a pull request. The Version Parity check fails unless all of these match:
+   - `package.json` (and the two root entries in `package-lock.json`)
+   - `server.json` (`version` and `packages[0].version`)
+   - `manifest.json`
+   - `bundle.config.json`
    - `src/mcp-server.ts` (SERVER_VERSION)
 
-2. Create and push tag:
+2. After that pull request is merged, tag the merge commit and push the tag:
    ```bash
-   git tag v1.x.x
-   git push origin main
+   git tag -a v1.x.x -m "v1.x.x"
    git push origin v1.x.x
    ```
 
 3. GitHub Actions automatically:
    - Publishes to NPM
+   - Creates the GitHub release with the Claude Desktop extension file
    - Publishes to MCP Registry
 
 ## 🤝 Getting Help
