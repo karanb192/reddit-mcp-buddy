@@ -632,7 +632,7 @@ export class RedditTools {
     }
 
     // Ask for more than the limit, since small and NSFW suggestions are dropped before the cut.
-    const searchSize = Math.min(100, params.limit * 2);
+    const searchSize = Math.min(100, params.limit * 3);
     const [searchOutcome, namesOutcome] = await Promise.allSettled([
       this.api.searchSubreddits(params.query, searchSize, params.include_nsfw),
       candidates.length > 0 ? this.api.getSubredditsByName(candidates) : Promise.resolve(null),
@@ -664,10 +664,18 @@ export class RedditTools {
 
     const searchResults: FoundSubreddit[] = [];
     const searchByName = new Map<string, FoundSubreddit>();
+    // An unreadable subreddit in the search is named only if the caller asked about it by name:
+    // the tool does not point at banned or quarantined subreddits nobody mentioned.
+    const unreadableInSearch = new Map<string, { name: string; reason: UnavailableReason }>();
     if (searchOutcome.status === 'fulfilled') {
       for (const data of subredditRecords(searchOutcome.value.listing)) {
         const key = data.display_name.toLowerCase();
-        if (searchByName.has(key) || unavailableReason(data)) continue;
+        const reason = unavailableReason(data);
+        if (reason) {
+          unreadableInSearch.set(key, { name: data.display_name, reason });
+          continue;
+        }
+        if (searchByName.has(key)) continue;
         const shaped = shapeSubreddit(data, 'reddit_search', searchOutcome.value.fetched_at);
         searchByName.set(key, shaped);
         searchResults.push(shaped);
@@ -691,6 +699,9 @@ export class RedditTools {
           candidateResults.push(shapeSubreddit(data, 'assistant', fetched_at));
         } else if (fromSearch) {
           candidateResults.push({ ...fromSearch, source: 'assistant' });
+        } else if (unreadableInSearch.has(name.toLowerCase())) {
+          const unreadable = unreadableInSearch.get(name.toLowerCase())!;
+          markUnavailable(unreadable.name, unreadable.reason);
         } else {
           notFound.push(name);
         }
@@ -698,6 +709,11 @@ export class RedditTools {
     } else if (namesOutcome.status === 'rejected') {
       for (const name of candidates) {
         const fromSearch = searchByName.get(name.toLowerCase());
+        const unreadable = unreadableInSearch.get(name.toLowerCase());
+        if (unreadable) {
+          markUnavailable(unreadable.name, unreadable.reason);
+          continue;
+        }
         candidateResults.push(fromSearch
           ? { ...fromSearch, source: 'assistant' }
           : {

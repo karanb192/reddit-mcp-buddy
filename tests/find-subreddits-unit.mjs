@@ -109,7 +109,7 @@ try {
   for (const u of requests) assert.equal(u.origin, 'https://oauth.reddit.com');
   const searchReq = requests.find(u => u.pathname === '/subreddits/search.json');
   assert.equal(searchReq.searchParams.get('q'), 'mechanical keyboards & typing?');
-  assert.equal(searchReq.searchParams.get('limit'), '20', 'asks for twice the limit, since small and NSFW suggestions are dropped before the cut');
+  assert.equal(searchReq.searchParams.get('limit'), '30', 'asks for three times the limit, since small and NSFW suggestions are dropped before the cut');
   assert.equal(searchReq.searchParams.get('include_over_18'), null);
   const infoReq = requests.find(u => u.pathname === '/api/info.json');
   assert.equal(infoReq.searchParams.get('sr_name'), 'MechanicalKeyboards,typing,notarealsub999', 'duplicates are removed before the lookup');
@@ -137,7 +137,7 @@ try {
 
   // A repeat call is served from the cache with the original as-of time, and the cached
   // Reddit listings are not changed by shaping or filtering.
-  const searchKey = CacheManager.createKey('subreddit-search', 'mechanical keyboards & typing?', 20, 'sfw');
+  const searchKey = CacheManager.createKey('subreddit-search', 'mechanical keyboards & typing?', 30, 'sfw');
   const namesKey = CacheManager.createKey('subreddit-names', 'mechanicalkeyboards', 'notarealsub999', 'typing');
   const before = JSON.stringify([fresh.cache.get(searchKey), fresh.cache.get(namesKey)]);
   assert.notEqual(before, '[null,null]');
@@ -156,7 +156,7 @@ try {
   mockReddit({ search: listing([t5('python')]), info: listing([]) });
   const solo = await client().tools.findSubreddits(parse({ query: 'python help', limit: 3 }));
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].searchParams.get('limit'), '6');
+  assert.equal(requests[0].searchParams.get('limit'), '9');
   assert.deepEqual(solo.not_found, []);
   assert.equal(solo.note, undefined);
 
@@ -247,6 +247,18 @@ try {
   assert.deepEqual(blocked.not_found, []);
   assert.ok(blocked.note.includes('unavailable'));
   assert.ok(!JSON.stringify(blocked).includes('About fatpeoplehate'), 'an unavailable subreddit\'s description is not passed on');
+  assert.ok(!JSON.stringify(blocked).includes('bannedinsearch'), 'an unreadable search result nobody asked about is not named');
+
+  // An unreadable subreddit seen only in the search is reported when the caller named it,
+  // whether the name check left it out or failed.
+  mockReddit({ search: listing([t5('BannedInSearch', nulled), t5('openclub')]), info: listing([]) });
+  const namedA = await client().tools.findSubreddits(parse({ query: 'q', candidates: ['bannedinsearch'] }));
+  assert.deepEqual(namedA.unavailable, [{ name: 'BannedInSearch', reason: 'banned_or_restricted' }]);
+  assert.deepEqual(namedA.not_found, []);
+  mockReddit({ search: listing([t5('BannedInSearch', nulled), t5('openclub')]), info: new Response('upstream', { status: 500 }) });
+  const namedB = await client().tools.findSubreddits(parse({ query: 'q', candidates: ['bannedinsearch', 'maybereal'] }));
+  assert.deepEqual(namedB.unavailable, [{ name: 'BannedInSearch', reason: 'banned_or_restricted' }]);
+  assert.deepEqual(namedB.results.map(r => [r.name, r.confirmed_exists]), [['maybereal', false], ['openclub', true]]);
 
   // Small suggestions are left out and counted; candidates are never filtered by size; the limit is applied after.
   mockReddit({
@@ -334,7 +346,7 @@ try {
   // Without credentials, before the cutoff: the credentials error, raised before any cache read or request.
   mockReddit({ search: listing([t5('python')]), info: listing([t5('python')]) });
   const loggedOut = client({ authenticated: false });
-  loggedOut.cache.set(CacheManager.createKey('subreddit-search', 'q', 20, 'sfw'), { fetched_at: 0, listing: listing([t5('python')]) });
+  loggedOut.cache.set(CacheManager.createKey('subreddit-search', 'q', 30, 'sfw'), { fetched_at: 0, listing: listing([t5('python')]) });
   const isCredentialsError = e =>
     e instanceof CredentialsRequiredError && e.status === 403 && e.message === CREDENTIALS_REQUIRED_MESSAGE;
   await assert.rejects(loggedOut.tools.findSubreddits(parse({ query: 'q' })), isCredentialsError);
