@@ -38,13 +38,12 @@ export function resolveIncludeNsfw(mode: NsfwMode, requested: boolean | undefine
   return requested ?? mode === 'always';
 }
 
-export const NSFW_NEVER_MESSAGE =
-  `This server is set to never return NSFW content (${NSFW_ENV}), so include_nsfw has no effect.`;
+export const NSFW_NEVER_MESSAGE = `This server is set to never return NSFW content (${NSFW_ENV}).`;
 
-/** What the model can do about hidden NSFW content under this mode. */
+/** For the tools that take include_nsfw: what the model can do about hidden NSFW content under this mode. */
 export function nsfwHint(mode: NsfwMode): string {
   return mode === 'never'
-    ? NSFW_NEVER_MESSAGE
+    ? `${NSFW_NEVER_MESSAGE} include_nsfw has no effect.`
     : 'Set include_nsfw true only if the user asks for NSFW content.';
 }
 

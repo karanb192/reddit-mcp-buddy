@@ -166,7 +166,7 @@ try {
   out = await client('never').tools.browseSubreddit(browse({ include_nsfw: true }));
   assert.deepEqual(ids(out), ['a', 'c']);
   assert.equal(out.nsfw_hidden, 2);
-  assert.match(out.note, /never return NSFW content \(REDDIT_BUDDY_NSFW\), so include_nsfw has no effect/);
+  assert.match(out.note, /never return NSFW content \(REDDIT_BUDDY_NSFW\)\. include_nsfw has no effect\.$/);
   assert.doesNotMatch(out.note, /Set include_nsfw true/);
 
   // browse_subreddit, always: shown unless the call says no.
@@ -253,7 +253,7 @@ try {
   assert.equal(requests.find(u => u.pathname === '/subreddits/search.json').searchParams.get('include_over_18'), null);
   assert.deepEqual(out.results.map(r => r.name), ['sfwsub']);
   assert.deepEqual(out.nsfw_hidden_candidates, ['nsfwcandidate']);
-  assert.match(out.note, /NSFW subreddits are left out\. This server is set to never return NSFW content/);
+  assert.match(out.note, /NSFW subreddits are left out\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\. include_nsfw has no effect\.$/);
   mockReddit();
   out = await client('never').tools.findSubreddits(find({}));
   assert.equal(out.note, undefined, 'no notice when nothing was asked for and nothing was hidden');
@@ -277,7 +277,7 @@ try {
   }
   mockReddit();
   await assert.rejects(client('never').tools.getPostDetails(details({})),
-    /^Error: This post is marked NSFW\. This server is set to never return NSFW content/);
+    /^Error: This post is marked NSFW\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\.$/);
   mockReddit({ post: t3('p2', false) });
   out = await client('never').tools.getPostDetails(details({ post_id: 'p2' }));
   assert.equal(out.post.id, 'p2');
@@ -300,7 +300,7 @@ try {
     assert.ok(!lockedDump.includes(gone), `${gone} must not appear on a server set to never`);
   }
   assert.equal(out.nsfwHidden, 3);
-  assert.match(out.nsfwNote, /^3 NSFW items were left out of this user's posts and comments\. This server is set to never/);
+  assert.match(out.nsfwNote, /^3 NSFW items were left out of this user's posts and comments\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\.$/);
   const cachedPosts = c.cache.get(CacheManager.createKey('user-posts', 'someone', 'submitted', 'new', 'all', 10));
   assert.equal(cachedPosts.data.children.length, 2, 'the cached listing keeps every post');
 

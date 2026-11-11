@@ -815,7 +815,7 @@ export class RedditTools {
     }
 
     if (this.nsfwMode === 'never' && (params.include_nsfw === true || nsfwHidden > 0)) {
-      notes.push(`NSFW subreddits are left out. ${NSFW_NEVER_MESSAGE}`);
+      notes.push(`NSFW subreddits are left out. ${nsfwHint(this.nsfwMode)}`);
     }
 
     const shown = [...shownCandidates, ...shownSuggestions];
