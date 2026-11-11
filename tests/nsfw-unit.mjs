@@ -87,7 +87,7 @@ function mockReddit(routes = {}) {
     } else if (/^\/r\/[^/]+\/about\.json$/.test(p)) {
       answer = routes.about ?? t5('sub', true);
     } else if (/\/comments\/[a-z0-9]+\.json$/.test(p)) {
-      answer = [listing([routes.post ?? t3('p1', true)]), listing([])];
+      answer = [listing([routes.post ?? t3('p1', true)]), listing(routes.postComments ?? [])];
     } else if (/^\/user\/[^/]+\/about\.json$/.test(p)) {
       answer = { kind: 't2', data: { name: 'someone', link_karma: 10, comment_karma: 20, created_utc: 1600000000 } };
     } else if (/^\/user\/[^/]+\/submitted\.json$/.test(p)) {
@@ -344,6 +344,11 @@ try {
   mockReddit({ post: t3('p2', false) });
   out = await client('never').tools.getPostDetails(details({ post_id: 'p2' }));
   assert.equal(out.post.id, 'p2');
+  // Reddit puts no NSFW mark on the comments of a post page, so on never the post's mark decides for them.
+  const pageComment = id => ({ kind: 't1', data: { id, author: 'x', body: `page comment ${id}`, score: 1, created_utc: 1700000000, permalink: `/r/sub/comments/p2/t/${id}/`, replies: '' } });
+  mockReddit({ post: t3('p2', false), postComments: [pageComment('k1'), pageComment('k2')] });
+  out = await client('never').tools.getPostDetails(details({ post_id: 'p2' }));
+  assert.equal(out.total_comments, 2, 'comments of a post marked not NSFW are returned on never');
   mockReddit({ post: t3('p3', undefined) });
   await assert.rejects(client('never').tools.getPostDetails(details({ post_id: 'p3' })),
     /^Error: Reddit did not say whether this post is NSFW\. This server is set to never return NSFW content \(REDDIT_BUDDY_NSFW\)\.$/);

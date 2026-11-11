@@ -456,6 +456,7 @@ export class RedditTools {
     }
     const post = postChild.data;
 
+    // Comments on a post page carry no NSFW mark of their own (checked live, 2026-11-11): the post's mark covers them.
     if (lockedOut(this.nsfwMode, post.over_18)) {
       throw new Error(`${post.over_18 ? 'This post is marked NSFW.' : 'Reddit did not say whether this post is NSFW.'} ${NSFW_NEVER_MESSAGE}`);
     }
