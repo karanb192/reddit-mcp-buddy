@@ -103,17 +103,46 @@ node scripts/rate-limit-tester.cjs auth 120        # Test 120 requests in authen
      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
    ```
 
+### Private sandbox posting test
+
+Build the checkout, then print the proposed test without making any requests:
+
+```bash
+npm run build
+REDDIT_TEST_SUBREDDIT=your_private_sub node tests/live-write.mjs
+```
+
+The live run requires an approved app, `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`, plus either `REDDIT_REFRESH_TOKEN` or the script-app `REDDIT_USERNAME`/`REDDIT_PASSWORD` pair. The account must moderate the private test subreddit. OAuth validation requires all six scopes: `identity`, `read`, `submit`, `flair`, `history` for recovery, and `edit` for cleanup. The harness checks these before connecting any posting client. Keep credentials outside the repository. On Node versions supporting `--env-file`, a local environment file can supply them:
+
+```bash
+RUN_WRITE_TESTS=1 REDDIT_TEST_SUBREDDIT=your_private_sub \
+  node --env-file=/path/to/private.env tests/live-write.mjs --run
+```
+
+This command performs real writes. It starts actual stdio MCP connections, declines one post request, accepts one test post, and tests comment preview followed by an identical submission from a client without elicitation. The harness supplies the confirmation responses automatically; running it authorizes these test actions. It creates one post and one comment, verifies their content, then attempts deletion of both even after a failure.
+
+The unique marker and any cleanup failures are printed for manual inspection. Lost responses trigger a search of the test user's newest posts and comments; an unresolved outcome or unverified deletion fails the run. Cleanup cannot be guaranteed if the process is killed or Reddit is unavailable. Ordinary unit tests use an offline API fixture, and normal integration runs skip posting unless explicitly enabled.
+
 ## 🔑 Authentication Setup
 
 ### Using your Reddit app
 
-Live testing needs a Reddit app whose API access Reddit has already approved. Reddit stopped accepting new requests for public API access on 2026-10-31 ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)), and it ends RSS support on 2026-11-13 ([changelog](https://support.reddithelp.com/hc/en-us/articles/54353370049684-Changelog-October-8-2026)), so from that date the server reads nothing from Reddit without credentials. Offline unit tests (`npm test`) need no credentials.
+Live testing needs a Reddit app whose API access Reddit has already approved. Reddit stopped accepting new requests for public API access on 2026-10-31 ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/)), and it set 2026-11-13 as the end of RSS support ([changelog](https://support.reddithelp.com/hc/en-us/articles/54353370049684-Changelog-October-8-2026)), so the server reads nothing from Reddit without credentials. Offline unit tests (`npm test`) need no credentials.
 
 1. Go to https://www.reddit.com/prefs/apps and open your approved app
 2. Note your credentials:
    - Client ID: The string under the app's name and type
    - Client Secret: The secret string
 3. To keep API access past 2027-01-12, the app's owner registers it at https://developers.reddit.com/app-registration ([migration post](https://www.reddit.com/r/redditdev/comments/1wubcvf/moving_data_api_apps_to_the_developer_platform/))
+
+### Interactive Authentication Setup (for local testing only)
+
+For local development and testing, you can set up authentication interactively:
+```bash
+npx -y reddit-mcp-buddy --auth
+```
+
+This will prompt you for Reddit app credentials and save them locally. **Note: This does NOT work with Claude Desktop** - use environment variables in your Claude config instead.
 
 ## 📝 Code Style
 
